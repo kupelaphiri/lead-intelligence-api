@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Business {
+  id            Int         @id @default(autoincrement())
+  name          String
+  phone         String?
+  website       String?
+  city          String
+  category      String
+  rating        Float?
+  reviews       Int?
+  googleMapsUrl String?
+  scrapedAt     DateTime    @default(now()) @db.Timestamptz(6)
+  enrichment    Enrichment?
+
+  @@unique([name, city, category])
+  @@index([name])
+  @@index([city])
+  @@index([category])
+  @@map("businesses")
+}
+
+model Enrichment {
+  id          Int      @id @default(autoincrement())
+  businessId  Int      @unique
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  emails      String[] @default([])
+  instagram   String?
+  facebook    String?
+  linkedin    String?
+  lastChecked DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("enrichments")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  plan         String   @default("free")
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  apiKeys      ApiKey[]
+
+  @@map("users")
+}
+
+model ApiKey {
+  id           Int      @id @default(autoincrement())
+  key          String   @unique
+  userId       Int?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  plan         String   @default("free")
+  requestsUsed Int      @default(0)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("api_keys")
+}
