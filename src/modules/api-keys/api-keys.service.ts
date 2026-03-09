@@ -1,10 +1,14 @@
 import {
-  HttpException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { ApiKeyRecord, PrismaService } from '../../prisma/prisma.service';
+import {
+  ApiKeyRecord,
+  ApiKeyWithUserRecord,
+  PrismaService,
+} from '../../prisma/prisma.service';
 
 @Injectable()
 export class ApiKeysService {
@@ -20,12 +24,9 @@ export class ApiKeysService {
       throw new UnauthorizedException('Invalid API key');
     }
 
-    const limit = this.getPlanLimit(apiKey.plan);
-    if (limit !== null && apiKey.requestsUsed >= limit) {
-      throw new HttpException(
-        `Plan limit reached for '${apiKey.plan}' (${limit} requests).`,
-        429,
-      );
+    const subscription = await this.prisma.findApiKeyWithUserByKey(rawKey);
+    if (subscription?.user?.subscriptionStatus === 'canceled') {
+      throw new ForbiddenException('Subscription is canceled');
     }
 
     return this.prisma.incrementApiKeyRequests(apiKey.id);
@@ -38,11 +39,19 @@ export class ApiKeysService {
     return this.prisma.findApiKeyByKey(rawKey);
   }
 
-  async createForUser(userId: number, plan: string): Promise<ApiKeyRecord> {
+  async findWithUserByKey(
+    rawKey: string | undefined,
+  ): Promise<ApiKeyWithUserRecord | null> {
+    if (!rawKey) {
+      return null;
+    }
+    return this.prisma.findApiKeyWithUserByKey(rawKey);
+  }
+
+  async createForUser(userId: number): Promise<ApiKeyRecord> {
     return this.prisma.createApiKey({
       key: this.generateApiKey(),
       userId,
-      plan,
     });
   }
 
@@ -50,18 +59,15 @@ export class ApiKeysService {
     return this.prisma.findLatestApiKeyByUserId(userId);
   }
 
-  private generateApiKey(): string {
-    return `li_${randomBytes(24).toString('hex')}`;
+  async rotateForUser(userId: number): Promise<ApiKeyRecord> {
+    await this.prisma.deleteApiKeysByUserId(userId);
+    return this.prisma.createApiKey({
+      key: this.generateApiKey(),
+      userId,
+    });
   }
 
-  private getPlanLimit(plan: string): number | null {
-    const normalizedPlan = plan.trim().toLowerCase();
-    const limits: Record<string, number | null> = {
-      free: Number.parseInt(process.env.FREE_PLAN_REQUEST_LIMIT ?? '1000', 10),
-      pro: Number.parseInt(process.env.PRO_PLAN_REQUEST_LIMIT ?? '50000', 10),
-      enterprise: null,
-    };
-
-    return limits[normalizedPlan] ?? limits.free;
+  private generateApiKey(): string {
+    return `li_${randomBytes(24).toString('hex')}`;
   }
 }

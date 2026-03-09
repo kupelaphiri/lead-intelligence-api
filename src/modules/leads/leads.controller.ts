@@ -1,4 +1,10 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Headers,
+  Query,
+} from '@nestjs/common';
 import { LeadsService } from './leads.service';
 
 @Controller('leads')
@@ -7,6 +13,7 @@ export class LeadsController {
 
   @Get()
   async getLeads(
+    @Headers('x-api-key') apiKey: string | undefined,
     @Query('query') query?: string,
     @Query('city') city?: string,
     @Query('limit') limit = '20',
@@ -20,6 +27,11 @@ export class LeadsController {
       ? Math.max(1, Math.min(parsedLimit, 100))
       : 20;
 
-    return this.leadsService.getLeads(query.trim(), city.trim(), boundedLimit);
+    return this.leadsService.getLeads(
+      apiKey,
+      query.trim(),
+      city.trim(),
+      boundedLimit,
+    );
   }
 }

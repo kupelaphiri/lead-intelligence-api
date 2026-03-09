@@ -4,7 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { PrismaService, UserRecord } from '../../prisma/prisma.service';
+import { PrismaService, UserWithPlanRecord } from '../../prisma/prisma.service';
 import { hashPassword, verifyPassword } from './password.util';
 
 @Injectable()
@@ -15,8 +15,7 @@ export class UsersService {
     email: string;
     password: string;
     name?: string;
-    plan?: string;
-  }): Promise<UserRecord> {
+  }): Promise<UserWithPlanRecord> {
     const email = input.email.trim().toLowerCase();
     if (!email || !input.password) {
       throw new BadRequestException('email and password are required');
@@ -27,18 +26,23 @@ export class UsersService {
       throw new ConflictException('User already exists');
     }
 
+    const starterPlan = await this.prisma.findDefaultStarterPlan();
+    if (!starterPlan) {
+      throw new BadRequestException('Default Starter plan is not configured');
+    }
+
     return this.prisma.createUser({
       email,
       passwordHash: hashPassword(input.password),
       name: input.name?.trim() || null,
-      plan: input.plan?.trim() || 'free',
+      planId: starterPlan.id,
     });
   }
 
   async validateCredentials(
     email: string,
     password: string,
-  ): Promise<UserRecord> {
+  ): Promise<UserWithPlanRecord> {
     const normalizedEmail = email.trim().toLowerCase();
     const user = await this.prisma.findUserByEmail(normalizedEmail);
 
@@ -49,7 +53,23 @@ export class UsersService {
     return user;
   }
 
-  async findById(id: number): Promise<UserRecord | null> {
+  async findById(id: number): Promise<UserWithPlanRecord | null> {
     return this.prisma.findUserById(id);
+  }
+
+  async updatePlan(
+    userId: number,
+    planName: string,
+  ): Promise<UserWithPlanRecord> {
+    const plan = await this.prisma.findPlanByName(planName);
+    if (!plan) {
+      throw new BadRequestException('Invalid plan selected');
+    }
+
+    return this.prisma.updateUserPlan(userId, plan.id);
+  }
+
+  async cancelSubscription(userId: number): Promise<UserWithPlanRecord> {
+    return this.prisma.cancelUserSubscription(userId);
   }
 }

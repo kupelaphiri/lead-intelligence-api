@@ -4,11 +4,18 @@ import { INestApplication, Injectable, OnModuleInit } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { PrismaClient } = require('@prisma/client');
 
+export interface PlanRecord {
+  id: number;
+  name: string;
+  priceMonthlyUsd: number | null;
+  leadsLimit: number | null;
+  createdAt: Date;
+}
+
 export interface ApiKeyRecord {
   id: number;
   key: string;
   userId: number | null;
-  plan: string;
   requestsUsed: number;
   createdAt: Date;
 }
@@ -18,8 +25,19 @@ export interface UserRecord {
   email: string;
   passwordHash: string;
   name: string | null;
-  plan: string;
+  planId: number | null;
+  leadsCollected: number;
+  subscriptionStatus: string;
+  subscriptionCanceledAt: Date | null;
   createdAt: Date;
+}
+
+export interface UserWithPlanRecord extends UserRecord {
+  plan: PlanRecord | null;
+}
+
+export interface ApiKeyWithUserRecord extends ApiKeyRecord {
+  user: UserWithPlanRecord | null;
 }
 
 export interface EnrichmentRecord {
@@ -51,22 +69,77 @@ export interface BusinessWithEnrichment extends BusinessRecord {
 
 @Injectable()
 export class PrismaService implements OnModuleInit {
-  // Prisma client types are generated at runtime via `prisma generate`.
-  // Keep this surface typed in our app layer for compile-time safety.
   private readonly client: any = new PrismaClient();
 
   async onModuleInit(): Promise<void> {
     await this.client.$connect();
+    await this.seedDefaultPlans();
   }
 
   enableShutdownHooks(app: INestApplication): void {
-    this.client.$on('beforeExit', async () => {
+    const shutdown = async (): Promise<void> => {
+      await this.client.$disconnect();
       await app.close();
+    };
+
+    process.once('SIGINT', () => {
+      void shutdown();
     });
+
+    process.once('SIGTERM', () => {
+      void shutdown();
+    });
+  }
+
+  async seedDefaultPlans(): Promise<void> {
+    const defaults: Array<{
+      name: string;
+      priceMonthlyUsd: number | null;
+      leadsLimit: number | null;
+    }> = [
+      { name: 'Starter', priceMonthlyUsd: 49, leadsLimit: 10000 },
+      { name: 'Growth', priceMonthlyUsd: 149, leadsLimit: 50000 },
+      { name: 'Pro', priceMonthlyUsd: 399, leadsLimit: 200000 },
+      { name: 'Enterprise', priceMonthlyUsd: null, leadsLimit: null },
+    ];
+
+    for (const plan of defaults) {
+      await this.client.plan.upsert({
+        where: { name: plan.name },
+        update: {
+          priceMonthlyUsd: plan.priceMonthlyUsd,
+          leadsLimit: plan.leadsLimit,
+        },
+        create: plan,
+      });
+    }
+  }
+
+  async findPlanByName(name: string): Promise<PlanRecord | null> {
+    return this.client.plan.findUnique({ where: { name } });
+  }
+
+  async findDefaultStarterPlan(): Promise<PlanRecord | null> {
+    return this.client.plan.findUnique({ where: { name: 'Starter' } });
   }
 
   async findApiKeyByKey(key: string): Promise<ApiKeyRecord | null> {
     return this.client.apiKey.findUnique({ where: { key } });
+  }
+
+  async findApiKeyWithUserByKey(
+    key: string,
+  ): Promise<ApiKeyWithUserRecord | null> {
+    return this.client.apiKey.findUnique({
+      where: { key },
+      include: {
+        user: {
+          include: {
+            plan: true,
+          },
+        },
+      },
+    });
   }
 
   async incrementApiKeyRequests(id: number): Promise<ApiKeyRecord> {
@@ -79,7 +152,6 @@ export class PrismaService implements OnModuleInit {
   async createApiKey(data: {
     key: string;
     userId: number;
-    plan: string;
   }): Promise<ApiKeyRecord> {
     return this.client.apiKey.create({ data });
   }
@@ -91,21 +163,85 @@ export class PrismaService implements OnModuleInit {
     });
   }
 
-  async findUserByEmail(email: string): Promise<UserRecord | null> {
-    return this.client.user.findUnique({ where: { email } });
+  async deleteApiKeysByUserId(userId: number): Promise<void> {
+    await this.client.apiKey.deleteMany({ where: { userId } });
+  }
+
+  async findUserByEmail(email: string): Promise<UserWithPlanRecord | null> {
+    return this.client.user.findUnique({
+      where: { email },
+      include: {
+        plan: true,
+      },
+    });
   }
 
   async createUser(data: {
     email: string;
     passwordHash: string;
     name: string | null;
-    plan: string;
-  }): Promise<UserRecord> {
-    return this.client.user.create({ data });
+    planId: number;
+  }): Promise<UserWithPlanRecord> {
+    return this.client.user.create({
+      data,
+      include: {
+        plan: true,
+      },
+    });
   }
 
-  async findUserById(id: number): Promise<UserRecord | null> {
-    return this.client.user.findUnique({ where: { id } });
+  async findUserById(id: number): Promise<UserWithPlanRecord | null> {
+    return this.client.user.findUnique({
+      where: { id },
+      include: {
+        plan: true,
+      },
+    });
+  }
+
+  async updateUserPlan(
+    userId: number,
+    planId: number,
+  ): Promise<UserWithPlanRecord> {
+    return this.client.user.update({
+      where: { id: userId },
+      data: {
+        planId,
+        subscriptionStatus: 'active',
+        subscriptionCanceledAt: null,
+      },
+      include: {
+        plan: true,
+      },
+    });
+  }
+
+  async cancelUserSubscription(userId: number): Promise<UserWithPlanRecord> {
+    return this.client.user.update({
+      where: { id: userId },
+      data: {
+        subscriptionStatus: 'canceled',
+        subscriptionCanceledAt: new Date(),
+      },
+      include: {
+        plan: true,
+      },
+    });
+  }
+
+  async incrementUserLeads(userId: number, amount: number): Promise<void> {
+    if (amount <= 0) {
+      return;
+    }
+
+    await this.client.user.update({
+      where: { id: userId },
+      data: {
+        leadsCollected: {
+          increment: amount,
+        },
+      },
+    });
   }
 
   async findBusinessesByQueryCity(

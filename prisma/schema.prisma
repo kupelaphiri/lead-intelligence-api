@@ -40,14 +40,29 @@ model Enrichment {
   @@map("enrichments")
 }
 
+model Plan {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique
+  priceMonthlyUsd Int?
+  leadsLimit      Int?
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  users           User[]
+
+  @@map("plans")
+}
+
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String
-  name         String?
-  plan         String   @default("free")
-  createdAt    DateTime @default(now()) @db.Timestamptz(6)
-  apiKeys      ApiKey[]
+  id                     Int       @id @default(autoincrement())
+  email                  String    @unique
+  passwordHash           String
+  name                   String?
+  planId                 Int?
+  plan                   Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+  leadsCollected         Int       @default(0)
+  subscriptionStatus     String    @default("active")
+  subscriptionCanceledAt DateTime? @db.Timestamptz(6)
+  createdAt              DateTime  @default(now()) @db.Timestamptz(6)
+  apiKeys                ApiKey[]
 
   @@map("users")
 }
@@ -57,7 +72,6 @@ model ApiKey {
   key          String   @unique
   userId       Int?
   user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  plan         String   @default("free")
   requestsUsed Int      @default(0)
   createdAt    DateTime @default(now()) @db.Timestamptz(6)
 

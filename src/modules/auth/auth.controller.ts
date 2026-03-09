@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Headers, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Patch, Post } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
+import { UpdatePlanDto } from './dto/update-plan.dto';
 import { Public } from './public.decorator';
 
 @Controller('auth')
@@ -27,5 +28,20 @@ export class AuthController {
   @Get('me')
   async me(@Headers('x-api-key') apiKey: string | undefined): Promise<unknown> {
     return this.authService.me(apiKey);
+  }
+
+  @Patch('plan')
+  async updatePlan(
+    @Headers('x-api-key') apiKey: string | undefined,
+    @Body() payload: UpdatePlanDto,
+  ): Promise<{ apiKey: string | null; user: unknown }> {
+    return this.authService.updatePlan(apiKey, payload);
+  }
+
+  @Patch('subscription/cancel')
+  async cancelSubscription(
+    @Headers('x-api-key') apiKey: string | undefined,
+  ): Promise<{ user: unknown }> {
+    return this.authService.cancelSubscription(apiKey);
   }
 }
