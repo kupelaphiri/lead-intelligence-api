@@ -97,6 +97,7 @@ export class PrismaService implements OnModuleInit {
       priceMonthlyUsd: number | null;
       leadsLimit: number | null;
     }> = [
+      { name: 'Free', priceMonthlyUsd: 0, leadsLimit: 1000 },
       { name: 'Starter', priceMonthlyUsd: 49, leadsLimit: 10000 },
       { name: 'Growth', priceMonthlyUsd: 149, leadsLimit: 50000 },
       { name: 'Pro', priceMonthlyUsd: 399, leadsLimit: 200000 },
@@ -119,8 +120,8 @@ export class PrismaService implements OnModuleInit {
     return this.client.plan.findUnique({ where: { name } });
   }
 
-  async findDefaultStarterPlan(): Promise<PlanRecord | null> {
-    return this.client.plan.findUnique({ where: { name: 'Starter' } });
+  async findDefaultFreePlan(): Promise<PlanRecord | null> {
+    return this.client.plan.findUnique({ where: { name: 'Free' } });
   }
 
   async findApiKeyByKey(key: string): Promise<ApiKeyRecord | null> {

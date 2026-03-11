@@ -12,13 +12,15 @@ export class EnrichmentQueue {
   ) {}
 
   async enqueueEnrichment(payload: EnrichmentJobPayload): Promise<void> {
+    const jobId = `enrichment-${payload.businessId}`;
+
     await this.queue.add(ENRICHMENT_JOB, payload, {
       attempts: 3,
       backoff: {
         type: 'exponential',
         delay: 2000,
       },
-      jobId: `${payload.businessId}`,
+      jobId,
     });
   }
 }

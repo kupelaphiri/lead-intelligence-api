@@ -15,6 +15,7 @@ export class UsersService {
     email: string;
     password: string;
     name?: string;
+    plan?: string;
   }): Promise<UserWithPlanRecord> {
     const email = input.email.trim().toLowerCase();
     if (!email || !input.password) {
@@ -26,16 +27,21 @@ export class UsersService {
       throw new ConflictException('User already exists');
     }
 
-    const starterPlan = await this.prisma.findDefaultStarterPlan();
-    if (!starterPlan) {
-      throw new BadRequestException('Default Starter plan is not configured');
+    const requestedPlanName = this.normalizePlanName(input.plan);
+    const selectedPlan =
+      requestedPlanName === 'Free'
+        ? await this.prisma.findDefaultFreePlan()
+        : await this.prisma.findPlanByName(requestedPlanName);
+
+    if (!selectedPlan) {
+      throw new BadRequestException('Selected plan is not configured');
     }
 
     return this.prisma.createUser({
       email,
       passwordHash: hashPassword(input.password),
       name: input.name?.trim() || null,
-      planId: starterPlan.id,
+      planId: selectedPlan.id,
     });
   }
 
@@ -61,7 +67,8 @@ export class UsersService {
     userId: number,
     planName: string,
   ): Promise<UserWithPlanRecord> {
-    const plan = await this.prisma.findPlanByName(planName);
+    const normalizedPlanName = this.normalizePlanName(planName);
+    const plan = await this.prisma.findPlanByName(normalizedPlanName);
     if (!plan) {
       throw new BadRequestException('Invalid plan selected');
     }
@@ -71,5 +78,25 @@ export class UsersService {
 
   async cancelSubscription(userId: number): Promise<UserWithPlanRecord> {
     return this.prisma.cancelUserSubscription(userId);
+  }
+
+  private normalizePlanName(plan: string | undefined): string {
+    const normalized = (plan ?? 'Free').trim().toLowerCase();
+    const mapping: Record<string, string> = {
+      free: 'Free',
+      starter: 'Starter',
+      growth: 'Growth',
+      pro: 'Pro',
+      enterprise: 'Enterprise',
+    };
+
+    const mapped = mapping[normalized];
+    if (!mapped) {
+      throw new BadRequestException(
+        'Invalid plan selected. Use Free, Starter, Growth, Pro, or Enterprise.',
+      );
+    }
+
+    return mapped;
   }
 }

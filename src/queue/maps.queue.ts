@@ -12,13 +12,17 @@ export class MapsQueue {
   ) {}
 
   async enqueueScrape(payload: MapsScrapeJobPayload): Promise<void> {
+    const normalizedJobId = `${payload.query}-${payload.city}`
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]/g, '-');
+
     await this.queue.add(MAPS_SCRAPE_JOB, payload, {
       attempts: 3,
       backoff: {
         type: 'exponential',
         delay: 2000,
       },
-      jobId: `${payload.query}:${payload.city}`.toLowerCase(),
+      jobId: normalizedJobId,
     });
   }
 }

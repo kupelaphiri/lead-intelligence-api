@@ -85,8 +85,11 @@ export class MapsScraper {
   private async extractDetailsFromDetailsPane(page: {
     locator: (selector: string) => {
       first: () => {
-        textContent: () => Promise<string | null>;
-        getAttribute: (name: string) => Promise<string | null>;
+        textContent: (options?: { timeout?: number }) => Promise<string | null>;
+        getAttribute: (
+          name: string,
+          options?: { timeout?: number },
+        ) => Promise<string | null>;
       };
     };
   }): Promise<{
@@ -96,19 +99,42 @@ export class MapsScraper {
     rating: number | null;
     reviews: number | null;
   }> {
-    const safeText = async (selector: string): Promise<string | null> => {
-      const text = await page.locator(selector).first().textContent();
-      const cleaned = text?.trim();
-      return cleaned && cleaned.length > 0 ? cleaned : null;
+    const safeText = async (
+      selector: string,
+      timeoutMs = 1500,
+    ): Promise<string | null> => {
+      try {
+        const text = await page
+          .locator(selector)
+          .first()
+          .textContent({ timeout: timeoutMs });
+        const cleaned = text?.trim();
+        return cleaned && cleaned.length > 0 ? cleaned : null;
+      } catch {
+        return null;
+      }
     };
 
-    const name = (await safeText('h1.DUwDvf')) ?? '';
+    const safeAttribute = async (
+      selector: string,
+      attribute: string,
+      timeoutMs = 1500,
+    ): Promise<string | null> => {
+      try {
+        const value = await page
+          .locator(selector)
+          .first()
+          .getAttribute(attribute, { timeout: timeoutMs });
+        const cleaned = value?.trim();
+        return cleaned && cleaned.length > 0 ? cleaned : null;
+      } catch {
+        return null;
+      }
+    };
 
-    const website =
-      (await page
-        .locator('a[data-item-id="authority"]')
-        .first()
-        .getAttribute('href')) ?? null;
+    const name = (await safeText('h1.DUwDvf', 4000)) ?? '';
+
+    const website = await safeAttribute('a[data-item-id="authority"]', 'href');
 
     const phone =
       (await safeText('button[data-item-id^="phone"] .Io6YTe')) ??
