@@ -11,8 +11,8 @@ export class MapsQueue {
     private readonly queue: Queue<MapsScrapeJobPayload>,
   ) {}
 
-  async enqueueScrape(payload: MapsScrapeJobPayload): Promise<void> {
-    const normalizedJobId = `${payload.query}-${payload.city}`
+  async enqueueScrape(payload: MapsScrapeJobPayload): Promise<string> {
+    const normalizedJobId = `${payload.query}-${payload.city}-${payload.limit}`
       .toLowerCase()
       .replace(/[^a-z0-9-_]/g, '-');
 
@@ -24,5 +24,7 @@ export class MapsQueue {
       },
       jobId: normalizedJobId,
     });
+
+    return normalizedJobId;
   }
 }

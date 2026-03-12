@@ -16,7 +16,11 @@ export interface ScrapedBusiness {
 export class MapsScraper {
   private readonly logger = new Logger(MapsScraper.name);
 
-  async scrape(query: string, city: string): Promise<ScrapedBusiness[]> {
+  async scrape(
+    query: string,
+    city: string,
+    maxResults = 100,
+  ): Promise<ScrapedBusiness[]> {
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -32,26 +36,31 @@ export class MapsScraper {
         waitUntil: 'domcontentloaded',
         timeout: 60000,
       });
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(1500);
 
       const feed = page.locator('div[role="feed"]');
       if ((await feed.count()) > 0) {
-        for (let i = 0; i < 10; i++) {
+        const scrollIterations = Math.max(6, Math.ceil(maxResults / 8));
+        for (let i = 0; i < scrollIterations; i++) {
           await feed.first().evaluate((node) => {
             node.scrollBy(0, node.scrollHeight);
           });
-          await page.waitForTimeout(1200);
+          await page.waitForTimeout(700);
         }
       }
 
       const cards = page.locator('div[role="article"]');
-      const cardCount = Math.min(await cards.count(), 50);
+      const cardCount = Math.min(await cards.count(), maxResults);
 
       for (let i = 0; i < cardCount; i++) {
+        if (collected.length >= maxResults) {
+          break;
+        }
+
         const card = cards.nth(i);
         try {
-          await card.click({ timeout: 5000 });
-          await page.waitForTimeout(800);
+          await card.click({ timeout: 3500 });
+          await page.waitForTimeout(400);
 
           const details = await this.extractDetailsFromDetailsPane(page);
           if (!details.name) {
@@ -75,7 +84,7 @@ export class MapsScraper {
         }
       }
 
-      return this.uniqueByName(collected);
+      return this.uniqueByName(collected).slice(0, maxResults);
     } finally {
       await context.close();
       await browser.close();
@@ -101,7 +110,7 @@ export class MapsScraper {
   }> {
     const safeText = async (
       selector: string,
-      timeoutMs = 1500,
+      timeoutMs = 1200,
     ): Promise<string | null> => {
       try {
         const text = await page
@@ -118,7 +127,7 @@ export class MapsScraper {
     const safeAttribute = async (
       selector: string,
       attribute: string,
-      timeoutMs = 1500,
+      timeoutMs = 1200,
     ): Promise<string | null> => {
       try {
         const value = await page
@@ -132,7 +141,7 @@ export class MapsScraper {
       }
     };
 
-    const name = (await safeText('h1.DUwDvf', 4000)) ?? '';
+    const name = (await safeText('h1.DUwDvf', 2500)) ?? '';
 
     const website = await safeAttribute('a[data-item-id="authority"]', 'href');
 

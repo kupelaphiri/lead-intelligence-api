@@ -21,13 +21,16 @@ export class MapsWorker extends WorkerHost {
   }
 
   async process(job: Job<MapsScrapeJobPayload>): Promise<void> {
+    const requestedLimit = Math.max(1, Math.min(job.data.limit ?? 100, 100));
+
     this.logger.log(
-      `Scraping started: query=${job.data.query}, city=${job.data.city}`,
+      `Scraping started: query=${job.data.query}, city=${job.data.city}, limit=${requestedLimit}`,
     );
 
     const scraped = await this.mapsScraper.scrape(
       job.data.query,
       job.data.city,
+      requestedLimit,
     );
 
     for (const business of scraped) {

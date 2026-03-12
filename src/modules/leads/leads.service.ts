@@ -3,29 +3,39 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ApiKeysService } from '../api-keys/api-keys.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MapsQueue } from '../../queue/maps.queue';
+
+interface LeadsResponse {
+  status: 'ready' | 'processing';
+  data: unknown[];
+  message?: string;
+  jobId?: string;
+  limit: number;
+  query: string;
+  city: string;
+}
 
 @Injectable()
 export class LeadsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mapsQueue: MapsQueue,
-    private readonly apiKeysService: ApiKeysService,
   ) {}
 
   async getLeads(
-    apiKey: string | undefined,
+    userId: number | undefined,
     query: string,
     city: string,
     limit: number,
-  ): Promise<unknown[]> {
-    const subscription = await this.apiKeysService.findWithUserByKey(apiKey);
-    const user = subscription?.user;
+  ): Promise<LeadsResponse> {
+    if (!userId) {
+      throw new UnauthorizedException('User context missing');
+    }
 
+    const user = await this.prisma.findUserById(userId);
     if (!user) {
-      throw new UnauthorizedException('No user linked to this API key');
+      throw new UnauthorizedException('User not found');
     }
 
     if (user.subscriptionStatus === 'canceled') {
@@ -48,10 +58,25 @@ export class LeadsService {
 
     if (businesses.length > 0) {
       await this.prisma.incrementUserLeads(user.id, businesses.length);
-      return businesses;
+      return {
+        status: 'ready',
+        data: businesses,
+        limit,
+        query,
+        city,
+      };
     }
 
-    await this.mapsQueue.enqueueScrape({ query, city });
-    return [];
+    const jobId = await this.mapsQueue.enqueueScrape({ query, city, limit });
+    return {
+      status: 'processing',
+      message:
+        'No cached leads yet. Scraping has started in the background. Retry shortly.',
+      data: [],
+      jobId,
+      limit,
+      query,
+      city,
+    };
   }
 }
