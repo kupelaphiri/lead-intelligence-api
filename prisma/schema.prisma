@@ -30,12 +30,12 @@ model Business {
 model Enrichment {
   id          Int      @id @default(autoincrement())
   businessId  Int      @unique
-  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   emails      String[] @default([])
   instagram   String?
   facebook    String?
   linkedin    String?
   lastChecked DateTime @default(now()) @db.Timestamptz(6)
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@map("enrichments")
 }
@@ -57,12 +57,12 @@ model User {
   passwordHash           String
   name                   String?
   planId                 Int?
-  plan                   Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
   leadsCollected         Int       @default(0)
   subscriptionStatus     String    @default("active")
   subscriptionCanceledAt DateTime? @db.Timestamptz(6)
   createdAt              DateTime  @default(now()) @db.Timestamptz(6)
   apiKeys                ApiKey[]
+  plan                   Plan?     @relation(fields: [planId], references: [id])
 
   @@map("users")
 }
@@ -71,9 +71,9 @@ model ApiKey {
   id           Int      @id @default(autoincrement())
   key          String   @unique
   userId       Int?
-  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   requestsUsed Int      @default(0)
   createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  user         User?    @relation(fields: [userId], references: [id])
 
   @@map("api_keys")
 }

@@ -1,5 +1,13 @@
 import { Body, Controller, Get, Patch, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiCookieAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
@@ -10,10 +18,14 @@ interface AuthRequest extends Request {
   authUserId?: number;
 }
 
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @ApiOperation({ summary: 'Sign up user and issue API key + JWT cookie' })
+  @ApiBody({ type: SignupDto })
+  @ApiResponse({ status: 201, description: 'Signup successful' })
   @Public()
   @Post('signup')
   async signup(
@@ -29,6 +41,9 @@ export class AuthController {
     };
   }
 
+  @ApiOperation({ summary: 'Login user and issue API key + JWT cookie' })
+  @ApiBody({ type: LoginDto })
+  @ApiResponse({ status: 201, description: 'Login successful' })
   @Public()
   @Post('login')
   async login(
@@ -44,17 +59,30 @@ export class AuthController {
     };
   }
 
+  @ApiOperation({ summary: 'Logout and clear auth cookie' })
+  @ApiBearerAuth()
+  @ApiCookieAuth('li_auth')
+  @ApiResponse({ status: 201, description: 'Logout successful' })
   @Post('logout')
   logout(@Res({ passthrough: true }) response: Response): { success: true } {
     this.clearAuthCookie(response);
     return { success: true };
   }
 
+  @ApiOperation({ summary: 'Get current authenticated user profile' })
+  @ApiBearerAuth()
+  @ApiCookieAuth('li_auth')
+  @ApiResponse({ status: 200, description: 'User profile' })
   @Get('me')
   async me(@Req() request: AuthRequest): Promise<unknown> {
     return this.authService.me(request.authUserId);
   }
 
+  @ApiOperation({ summary: 'Update subscription plan' })
+  @ApiBearerAuth()
+  @ApiCookieAuth('li_auth')
+  @ApiBody({ type: UpdatePlanDto })
+  @ApiResponse({ status: 200, description: 'Plan updated' })
   @Patch('plan')
   async updatePlan(
     @Req() request: AuthRequest,
@@ -63,6 +91,10 @@ export class AuthController {
     return this.authService.updatePlan(request.authUserId, payload);
   }
 
+  @ApiOperation({ summary: 'Cancel current subscription' })
+  @ApiBearerAuth()
+  @ApiCookieAuth('li_auth')
+  @ApiResponse({ status: 200, description: 'Subscription canceled' })
   @Patch('subscription/cancel')
   async cancelSubscription(
     @Req() request: AuthRequest,
