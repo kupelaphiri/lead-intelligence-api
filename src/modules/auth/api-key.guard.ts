@@ -7,6 +7,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
+import { getAuthCookieName } from '../../config/app.config';
 import { ApiKeysService } from '../api-keys/api-keys.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
@@ -68,7 +69,7 @@ export class ApiKeyGuard implements CanActivate {
   }
 
   private extractJwtToken(request: Request): string | null {
-    const cookieName = process.env.AUTH_COOKIE_NAME ?? 'li_auth';
+    const cookieName = getAuthCookieName();
     const cookieToken = (
       request.cookies as Record<string, string> | undefined
     )?.[cookieName];

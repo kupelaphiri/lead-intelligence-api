@@ -8,6 +8,10 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import {
+  getAuthCookieName,
+  shouldUseSecureCookies,
+} from '../../config/app.config';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
@@ -103,10 +107,10 @@ export class AuthController {
   }
 
   private setAuthCookie(response: Response, token: string): void {
-    const cookieName = process.env.AUTH_COOKIE_NAME ?? 'li_auth';
+    const cookieName = getAuthCookieName();
     response.cookie(cookieName, token, {
       httpOnly: true,
-      secure: process.env.COOKIE_SECURE === 'true',
+      secure: shouldUseSecureCookies(),
       sameSite:
         (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') ?? 'lax',
       path: '/',
@@ -115,7 +119,7 @@ export class AuthController {
   }
 
   private clearAuthCookie(response: Response): void {
-    const cookieName = process.env.AUTH_COOKIE_NAME ?? 'li_auth';
+    const cookieName = getAuthCookieName();
     response.clearCookie(cookieName, {
       path: '/',
     });

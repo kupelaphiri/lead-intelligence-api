@@ -4,21 +4,53 @@ import { Job } from 'bullmq';
 import { ENRICHMENT_QUEUE } from '../queue/queue.constants';
 import { EnrichmentJobPayload } from '../queue/queue.types';
 import { EnrichmentService } from '../modules/enrichment/enrichment.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 @Processor(ENRICHMENT_QUEUE)
 export class EnrichmentWorker extends WorkerHost {
   private readonly logger = new Logger(EnrichmentWorker.name);
 
-  constructor(private readonly enrichmentService: EnrichmentService) {
+  constructor(
+    private readonly enrichmentService: EnrichmentService,
+    private readonly prisma: PrismaService,
+  ) {
     super();
   }
 
   async process(job: Job<EnrichmentJobPayload>): Promise<void> {
-    await this.enrichmentService.enrichBusiness(
-      job.data.businessId,
-      job.data.website,
-    );
+    const jobId = String(job.id ?? `enrichment-${job.data.businessId}`);
+
+    await this.prisma.startJobRun({
+      queueName: ENRICHMENT_QUEUE,
+      jobId,
+      metadata: {
+        businessId: job.data.businessId,
+        website: job.data.website,
+      },
+    });
+
+    try {
+      await this.enrichmentService.enrichBusiness(
+        job.data.businessId,
+        job.data.website,
+      );
+
+      await this.prisma.finishJobRun({
+        queueName: ENRICHMENT_QUEUE,
+        jobId,
+        status: 'completed',
+        processedCount: 1,
+      });
+    } catch (error) {
+      await this.prisma.finishJobRun({
+        queueName: ENRICHMENT_QUEUE,
+        jobId,
+        status: 'failed',
+        errorMessage: error instanceof Error ? error.message : 'unknown error',
+      });
+      throw error;
+    }
   }
 
   @OnWorkerEvent('failed')

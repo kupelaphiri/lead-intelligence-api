@@ -10,8 +10,17 @@ export interface CrawledPage {
 @Injectable()
 export class WebsiteCrawler {
   private readonly logger = new Logger(WebsiteCrawler.name);
-  private readonly preferredKeywords = ['contact', 'about', 'team', 'support'];
-  private readonly maxPages = 10;
+  private readonly preferredKeywords = [
+    'contact',
+    'about',
+    'team',
+    'leadership',
+    'founder',
+    'staff',
+    'our-story',
+    'support',
+  ];
+  private readonly maxPages = 15;
 
   async crawl(startUrl: string): Promise<CrawledPage[]> {
     const normalizedStart = this.normalizeUrl(startUrl);

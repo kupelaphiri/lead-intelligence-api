@@ -50,6 +50,24 @@ export interface EnrichmentRecord {
   lastChecked: Date;
 }
 
+export interface BusinessContactRecord {
+  id: number;
+  businessId: number;
+  name: string | null;
+  title: string | null;
+  email: string | null;
+  phone: string | null;
+  linkedin: string | null;
+  sourceUrl: string;
+  sourceType: string;
+  sourcePage: string | null;
+  emailType: string | null;
+  roleCategory: string | null;
+  domainMatches: boolean;
+  confidence: number;
+  lastSeenAt: Date;
+}
+
 export interface BusinessRecord {
   id: number;
   name: string;
@@ -65,6 +83,27 @@ export interface BusinessRecord {
 
 export interface BusinessWithEnrichment extends BusinessRecord {
   enrichment: EnrichmentRecord | null;
+  contacts: BusinessContactRecord[];
+}
+
+export interface LeadDeliveryRecord {
+  id: number;
+  userId: number;
+  businessId: number;
+  deliveredAt: Date;
+}
+
+export interface JobRunRecord {
+  id: number;
+  queueName: string;
+  jobId: string;
+  status: string;
+  startedAt: Date;
+  completedAt: Date | null;
+  durationMs: number | null;
+  processedCount: number | null;
+  errorMessage: string | null;
+  metadata: unknown;
 }
 
 @Injectable()
@@ -257,7 +296,12 @@ export class PrismaService implements OnModuleInit {
       },
       orderBy: { scrapedAt: 'desc' },
       take: limit,
-      include: { enrichment: true },
+      include: {
+        enrichment: true,
+        contacts: {
+          orderBy: [{ confidence: 'desc' }, { lastSeenAt: 'desc' }],
+        },
+      },
     });
   }
 
@@ -315,5 +359,236 @@ export class PrismaService implements OnModuleInit {
         lastChecked: new Date(),
       },
     });
+  }
+
+  async replaceBusinessContacts(data: {
+    businessId: number;
+    contacts: Array<{
+      name: string | null;
+      title: string | null;
+      email: string | null;
+      phone: string | null;
+      linkedin: string | null;
+      sourceUrl: string;
+      sourceType: string;
+      sourcePage: string | null;
+      emailType: string | null;
+      roleCategory: string | null;
+      domainMatches: boolean;
+      confidence: number;
+    }>;
+  }): Promise<void> {
+    await this.client.$transaction(async (tx: any) => {
+      await tx.businessContact.deleteMany({
+        where: { businessId: data.businessId },
+      });
+
+      if (data.contacts.length === 0) {
+        return;
+      }
+
+      await tx.businessContact.createMany({
+        data: data.contacts.map((contact) => ({
+          businessId: data.businessId,
+          name: contact.name,
+          title: contact.title,
+          email: contact.email,
+          phone: contact.phone,
+          linkedin: contact.linkedin,
+          sourceUrl: contact.sourceUrl,
+          sourceType: contact.sourceType,
+          sourcePage: contact.sourcePage,
+          emailType: contact.emailType,
+          roleCategory: contact.roleCategory,
+          domainMatches: contact.domainMatches,
+          confidence: contact.confidence,
+          lastSeenAt: new Date(),
+        })),
+      });
+    });
+  }
+
+  async recordLeadDeliveries(
+    userId: number,
+    businessIds: number[],
+  ): Promise<number> {
+    const uniqueBusinessIds = [...new Set(businessIds)].filter((id) => id > 0);
+    if (uniqueBusinessIds.length === 0) {
+      return 0;
+    }
+
+    const existing = await this.client.leadDelivery.findMany({
+      where: {
+        userId,
+        businessId: { in: uniqueBusinessIds },
+      },
+      select: { businessId: true },
+    });
+
+    const existingIds = new Set<number>(
+      existing.map((delivery: { businessId: number }) => delivery.businessId),
+    );
+    const newBusinessIds = uniqueBusinessIds.filter(
+      (id) => !existingIds.has(id),
+    );
+
+    if (newBusinessIds.length === 0) {
+      return 0;
+    }
+
+    await this.client.leadDelivery.createMany({
+      data: newBusinessIds.map((businessId) => ({
+        userId,
+        businessId,
+        deliveredAt: new Date(),
+      })),
+      skipDuplicates: true,
+    });
+
+    return newBusinessIds.length;
+  }
+
+  async startJobRun(data: {
+    queueName: string;
+    jobId: string;
+    metadata?: unknown;
+  }): Promise<JobRunRecord> {
+    return this.client.jobRun.upsert({
+      where: {
+        queueName_jobId: {
+          queueName: data.queueName,
+          jobId: data.jobId,
+        },
+      },
+      create: {
+        queueName: data.queueName,
+        jobId: data.jobId,
+        status: 'running',
+        startedAt: new Date(),
+        metadata: data.metadata,
+      },
+      update: {
+        status: 'running',
+        startedAt: new Date(),
+        completedAt: null,
+        durationMs: null,
+        processedCount: null,
+        errorMessage: null,
+        metadata: data.metadata,
+      },
+    });
+  }
+
+  async finishJobRun(data: {
+    queueName: string;
+    jobId: string;
+    status: 'completed' | 'failed';
+    processedCount?: number;
+    errorMessage?: string | null;
+  }): Promise<JobRunRecord> {
+    const existing = await this.client.jobRun.findUnique({
+      where: {
+        queueName_jobId: {
+          queueName: data.queueName,
+          jobId: data.jobId,
+        },
+      },
+    });
+
+    const startedAt = existing?.startedAt
+      ? new Date(existing.startedAt).getTime()
+      : Date.now();
+    const completedAt = new Date();
+
+    return this.client.jobRun.upsert({
+      where: {
+        queueName_jobId: {
+          queueName: data.queueName,
+          jobId: data.jobId,
+        },
+      },
+      create: {
+        queueName: data.queueName,
+        jobId: data.jobId,
+        status: data.status,
+        startedAt: new Date(startedAt),
+        completedAt,
+        durationMs: completedAt.getTime() - startedAt,
+        processedCount: data.processedCount ?? null,
+        errorMessage: data.errorMessage ?? null,
+      },
+      update: {
+        status: data.status,
+        completedAt,
+        durationMs: completedAt.getTime() - startedAt,
+        processedCount: data.processedCount ?? null,
+        errorMessage: data.errorMessage ?? null,
+      },
+    });
+  }
+
+  async getJobRunSummary(): Promise<{
+    totalsByQueue: Array<{
+      queueName: string;
+      total: number;
+      completed: number;
+      failed: number;
+      avgDurationMs: number;
+    }>;
+    recentRuns: JobRunRecord[];
+  }> {
+    const runs = (await this.client.jobRun.findMany({
+      orderBy: { startedAt: 'desc' },
+      take: 100,
+    })) as JobRunRecord[];
+
+    const grouped = new Map<
+      string,
+      {
+        total: number;
+        completed: number;
+        failed: number;
+        durationSum: number;
+        durationCount: number;
+      }
+    >();
+
+    for (const run of runs) {
+      const current = grouped.get(run.queueName) ?? {
+        total: 0,
+        completed: 0,
+        failed: 0,
+        durationSum: 0,
+        durationCount: 0,
+      };
+
+      current.total += 1;
+      if (run.status === 'completed') {
+        current.completed += 1;
+      }
+      if (run.status === 'failed') {
+        current.failed += 1;
+      }
+      if (typeof run.durationMs === 'number') {
+        current.durationSum += run.durationMs;
+        current.durationCount += 1;
+      }
+
+      grouped.set(run.queueName, current);
+    }
+
+    return {
+      totalsByQueue: [...grouped.entries()].map(([queueName, value]) => ({
+        queueName,
+        total: value.total,
+        completed: value.completed,
+        failed: value.failed,
+        avgDurationMs:
+          value.durationCount > 0
+            ? Math.round(value.durationSum / value.durationCount)
+            : 0,
+      })),
+      recentRuns: runs,
+    };
   }
 }

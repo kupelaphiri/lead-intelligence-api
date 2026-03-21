@@ -49,6 +49,38 @@ export class LeadsController {
     description: 'Defaults to 100, max 100',
     example: 100,
   })
+  @ApiQuery({
+    name: 'hasEmail',
+    required: false,
+    description: 'Return only leads with at least one email',
+    example: 'true',
+  })
+  @ApiQuery({
+    name: 'hasContacts',
+    required: false,
+    description: 'Return only leads with extracted person/contact records',
+    example: 'true',
+  })
+  @ApiQuery({
+    name: 'minLeadScore',
+    required: false,
+    description: 'Minimum computed lead score from 0 to 100',
+    example: 50,
+  })
+  @ApiQuery({
+    name: 'refreshStale',
+    required: false,
+    description:
+      'Whether to queue refreshes for stale enrichment in background',
+    example: 'true',
+  })
+  @ApiQuery({
+    name: 'highQualityOnly',
+    required: false,
+    description:
+      'Return only leads with at least one high-quality contact or email',
+    example: 'true',
+  })
   @ApiResponse({ status: 200, description: 'Leads ready or processing status' })
   @Get()
   async getLeads(
@@ -56,6 +88,11 @@ export class LeadsController {
     @Query('query') query?: string,
     @Query('city') city?: string,
     @Query('limit') limit = '100',
+    @Query('hasEmail') hasEmail?: string,
+    @Query('hasContacts') hasContacts?: string,
+    @Query('minLeadScore') minLeadScore?: string,
+    @Query('refreshStale') refreshStale?: string,
+    @Query('highQualityOnly') highQualityOnly?: string,
   ): Promise<LeadsResponse> {
     if (!query || !city) {
       throw new BadRequestException('query and city are required');
@@ -65,12 +102,39 @@ export class LeadsController {
     const boundedLimit = Number.isFinite(parsedLimit)
       ? Math.max(1, Math.min(parsedLimit, 100))
       : 100;
+    const parsedMinLeadScore = Number.parseInt(minLeadScore ?? '', 10);
 
     return this.leadsService.getLeads(
       request.authUserId,
       query.trim(),
       city.trim(),
       boundedLimit,
+      {
+        hasEmail: this.parseBoolean(hasEmail),
+        hasContacts: this.parseBoolean(hasContacts),
+        minLeadScore: Number.isFinite(parsedMinLeadScore)
+          ? Math.max(0, Math.min(parsedMinLeadScore, 100))
+          : undefined,
+        refreshStale: this.parseBoolean(refreshStale),
+        highQualityOnly: this.parseBoolean(highQualityOnly),
+      },
     );
+  }
+
+  private parseBoolean(value?: string): boolean | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes'].includes(normalized)) {
+      return true;
+    }
+
+    if (['false', '0', 'no'].includes(normalized)) {
+      return false;
+    }
+
+    return undefined;
   }
 }

@@ -22,9 +22,17 @@ export class MapsScraper {
     city: string,
     maxResults = 100,
   ): Promise<ScrapedBusiness[]> {
-    const browser = await chromium.launch({ headless: true });
+    this.logger.log(`Launching browser for query="${query}" city="${city}"`);
+
+    const browser = await chromium.launch({
+      headless: true,
+      timeout: 30000,
+      args: ['--disable-dev-shm-usage', '--disable-gpu', '--no-sandbox'],
+    });
     const context = await browser.newContext();
     const page = await context.newPage();
+    page.setDefaultNavigationTimeout(45000);
+    page.setDefaultTimeout(10000);
 
     const collected: ScrapedBusiness[] = [];
 
@@ -33,14 +41,23 @@ export class MapsScraper {
         `${query} ${city}`,
       )}`;
 
+      this.logger.log(`Navigating to Google Maps: ${targetUrl}`);
       await page.goto(targetUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 60000,
       });
+      this.logger.log(`Navigation completed: ${page.url()}`);
       await page.waitForTimeout(1500);
 
+      if (this.isBlocked(page.url())) {
+        throw new Error(`Google Maps blocked or challenged the session at ${page.url()}`);
+      }
+
       const feed = page.locator('div[role="feed"]');
-      if ((await feed.count()) > 0) {
+      const feedCount = await feed.count();
+      this.logger.log(`Maps feed count: ${feedCount}`);
+
+      if (feedCount > 0) {
         const scrollIterations = Math.max(6, Math.ceil(maxResults / 8));
         for (let i = 0; i < scrollIterations; i++) {
           await feed.first().evaluate((node) => {
@@ -51,7 +68,17 @@ export class MapsScraper {
       }
 
       const cards = page.locator('div[role="article"]');
-      const cardCount = Math.min(await cards.count(), maxResults);
+      let rawCardCount = await cards.count();
+      if (rawCardCount === 0) {
+        this.logger.warn(
+          `No map cards detected for query="${query}" city="${city}". Current URL: ${page.url()}`,
+        );
+        await page.waitForTimeout(2500);
+        rawCardCount = await cards.count();
+      }
+
+      const cardCount = Math.min(rawCardCount, maxResults);
+      this.logger.log(`Found ${cardCount} candidate map cards`);
 
       for (let i = 0; i < cardCount; i++) {
         if (collected.length >= maxResults) {
@@ -79,6 +106,9 @@ export class MapsScraper {
             reviews: details.reviews,
             googleMapsUrl: page.url(),
           });
+          this.logger.debug(
+            `Collected business ${collected.length}/${maxResults}: ${details.name}`,
+          );
         } catch (error) {
           this.logger.debug(
             `Failed to parse map card ${i}: ${error instanceof Error ? error.message : 'unknown error'}`,
@@ -86,7 +116,13 @@ export class MapsScraper {
         }
       }
 
+      this.logger.log(`Maps scrape finished with ${collected.length} raw businesses`);
       return this.uniqueByName(collected).slice(0, maxResults);
+    } catch (error) {
+      this.logger.error(
+        `Maps scrape failed for query="${query}" city="${city}": ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      throw error;
     } finally {
       await context.close();
       await browser.close();
@@ -254,5 +290,15 @@ export class MapsScraper {
     }
 
     return output;
+  }
+
+  private isBlocked(url: string): boolean {
+    const lower = url.toLowerCase();
+    return (
+      lower.includes('/sorry/') ||
+      lower.includes('consent.google') ||
+      lower.includes('/interstitial') ||
+      lower.includes('ipv4.google.com')
+    );
   }
 }

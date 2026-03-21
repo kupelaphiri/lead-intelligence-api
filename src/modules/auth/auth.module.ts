@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
+import { isProductionEnv } from '../../config/app.config';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { UsersModule } from '../users/users.module';
 import { ApiKeyGuard } from './api-key.guard';
@@ -17,7 +18,9 @@ const jwtExpirySeconds = Number.parseInt(
     ApiKeysModule,
     UsersModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET ?? 'dev-jwt-secret',
+      secret:
+        process.env.JWT_SECRET ??
+        (isProductionEnv() ? undefined : 'dev-jwt-secret'),
       signOptions: {
         expiresIn: jwtExpirySeconds,
       },

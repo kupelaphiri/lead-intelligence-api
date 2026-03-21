@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  ContactExtractor,
+  ExtractedContact,
+} from '../../scraper/contact.extractor';
 import { EmailExtractor } from '../../scraper/email.extractor';
+import { EmailQualityService } from '../../scraper/email-quality.service';
 import { SocialExtractor } from '../../scraper/social.extractor';
+import { StructuredDataExtractor } from '../../scraper/structured-data.extractor';
 import { WebsiteCrawler } from '../../scraper/website.crawler';
 
 @Injectable()
@@ -16,8 +22,11 @@ export class EnrichmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly websiteCrawler: WebsiteCrawler,
+    private readonly contactExtractor: ContactExtractor,
     private readonly emailExtractor: EmailExtractor,
+    private readonly emailQualityService: EmailQualityService,
     private readonly socialExtractor: SocialExtractor,
+    private readonly structuredDataExtractor: StructuredDataExtractor,
   ) {}
 
   async enrichBusiness(businessId: number, website: string): Promise<void> {
@@ -46,6 +55,7 @@ export class EnrichmentService {
     }
 
     const emails = new Set<string>();
+    const contacts = new Map<string, ExtractedContact>();
     const socialProfiles: {
       instagram: string | null;
       facebook: string | null;
@@ -57,21 +67,90 @@ export class EnrichmentService {
     };
 
     for (const page of pages) {
+      const structured = this.structuredDataExtractor.extract(
+        page.html,
+        page.url,
+        website,
+      );
+
       for (const email of this.emailExtractor.extract(page.html)) {
-        emails.add(email);
+        const assessment = this.emailQualityService.assess(email, website);
+        if (!assessment.suppressed) {
+          emails.add(assessment.email);
+        }
+      }
+
+      for (const email of structured.emails) {
+        const assessment = this.emailQualityService.assess(email, website);
+        if (!assessment.suppressed) {
+          emails.add(assessment.email);
+        }
+      }
+
+      for (const contact of this.contactExtractor.extract(
+        page.html,
+        page.url,
+        website,
+      )) {
+        const normalizedContact = this.normalizeContact(contact, website);
+        if (!normalizedContact) {
+          continue;
+        }
+
+        if (normalizedContact.email) {
+          emails.add(normalizedContact.email);
+        }
+
+        const contactKey = [
+          normalizedContact.email ?? '',
+          normalizedContact.linkedin ?? '',
+          normalizedContact.name ?? '',
+          normalizedContact.sourceUrl,
+        ].join('|');
+        const existing = contacts.get(contactKey);
+        if (!existing || existing.confidence < normalizedContact.confidence) {
+          contacts.set(contactKey, normalizedContact);
+        }
+      }
+
+      for (const contact of structured.contacts) {
+        const normalizedContact = this.normalizeContact(contact, website);
+        if (!normalizedContact) {
+          continue;
+        }
+
+        if (normalizedContact.email) {
+          emails.add(normalizedContact.email);
+        }
+
+        const contactKey = [
+          normalizedContact.email ?? '',
+          normalizedContact.linkedin ?? '',
+          normalizedContact.name ?? '',
+          normalizedContact.sourceUrl,
+        ].join('|');
+        const existing = contacts.get(contactKey);
+        if (!existing || existing.confidence < normalizedContact.confidence) {
+          contacts.set(contactKey, normalizedContact);
+        }
       }
 
       const social = this.socialExtractor.extract(page.html, page.url);
-      socialProfiles.instagram ??= social.instagram;
-      socialProfiles.facebook ??= social.facebook;
-      socialProfiles.linkedin ??= social.linkedin;
+      socialProfiles.instagram ??=
+        structured.socials.instagram ?? social.instagram;
+      socialProfiles.facebook ??=
+        structured.socials.facebook ?? social.facebook;
+      socialProfiles.linkedin ??=
+        structured.socials.linkedin ?? social.linkedin;
     }
 
-    await this.saveResult(businessId, [...emails], socialProfiles);
+    await this.saveResult(businessId, [...emails], socialProfiles, [
+      ...contacts.values(),
+    ]);
 
-    if (this.hasAnyData([...emails], socialProfiles)) {
+    if (this.hasAnyData([...emails], socialProfiles, [...contacts.values()])) {
       this.logger.log(
-        `Enrichment completed for business ${businessId}: emails=${emails.size}, instagram=${Boolean(
+        `Enrichment completed for business ${businessId}: emails=${emails.size}, contacts=${contacts.size}, instagram=${Boolean(
           socialProfiles.instagram,
         )}, facebook=${Boolean(socialProfiles.facebook)}, linkedin=${Boolean(
           socialProfiles.linkedin,
@@ -93,6 +172,7 @@ export class EnrichmentService {
       facebook: string | null;
       linkedin: string | null;
     },
+    contacts: ExtractedContact[] = [],
   ): Promise<void> {
     await this.prisma.upsertEnrichment({
       businessId,
@@ -100,6 +180,24 @@ export class EnrichmentService {
       instagram: social.instagram,
       facebook: social.facebook,
       linkedin: social.linkedin,
+    });
+
+    await this.prisma.replaceBusinessContacts({
+      businessId,
+      contacts: contacts.map((contact) => ({
+        name: contact.name,
+        title: contact.title,
+        email: contact.email,
+        phone: contact.phone,
+        linkedin: contact.linkedin,
+        sourceUrl: contact.sourceUrl,
+        sourceType: contact.sourceType,
+        sourcePage: contact.sourcePage,
+        emailType: contact.emailType,
+        roleCategory: contact.roleCategory,
+        domainMatches: contact.domainMatches,
+        confidence: contact.confidence,
+      })),
     });
   }
 
@@ -165,12 +263,42 @@ export class EnrichmentService {
       facebook: string | null;
       linkedin: string | null;
     },
+    contacts: ExtractedContact[] = [],
   ): boolean {
     return Boolean(
       emails.length > 0 ||
+      contacts.length > 0 ||
       social.instagram ||
       social.facebook ||
       social.linkedin,
     );
+  }
+
+  private normalizeContact(
+    contact: ExtractedContact,
+    website: string,
+  ): ExtractedContact | null {
+    if (!contact.email) {
+      return contact.phone || contact.linkedin ? contact : null;
+    }
+
+    const assessment = this.emailQualityService.assess(contact.email, website);
+    if (assessment.suppressed && !contact.phone && !contact.linkedin) {
+      return null;
+    }
+
+    return {
+      ...contact,
+      email: assessment.suppressed ? null : assessment.email,
+      confidence: Math.max(
+        0,
+        Math.min(
+          assessment.suppressed
+            ? contact.confidence - 30
+            : Math.round((contact.confidence + assessment.score) / 2),
+          100,
+        ),
+      ),
+    };
   }
 }

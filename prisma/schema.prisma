@@ -19,6 +19,8 @@ model Business {
   googleMapsUrl String?
   scrapedAt     DateTime    @default(now()) @db.Timestamptz(6)
   enrichment    Enrichment?
+  contacts      BusinessContact[]
+  deliveries    LeadDelivery[]
 
   @@unique([name, city, category])
   @@index([name])
@@ -38,6 +40,30 @@ model Enrichment {
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@map("enrichments")
+}
+
+model BusinessContact {
+  id            Int      @id @default(autoincrement())
+  businessId    Int
+  name          String?
+  title         String?
+  email         String?
+  phone         String?
+  linkedin      String?
+  sourceUrl     String
+  sourceType    String   @default("website")
+  sourcePage    String?
+  emailType     String?
+  roleCategory  String?
+  domainMatches Boolean  @default(false)
+  confidence    Int      @default(0)
+  lastSeenAt    DateTime @default(now()) @db.Timestamptz(6)
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([email])
+  @@index([confidence])
+  @@map("business_contacts")
 }
 
 model Plan {
@@ -62,6 +88,7 @@ model User {
   subscriptionCanceledAt DateTime? @db.Timestamptz(6)
   createdAt              DateTime  @default(now()) @db.Timestamptz(6)
   apiKeys                ApiKey[]
+  leadDeliveries         LeadDelivery[]
   plan                   Plan?     @relation(fields: [planId], references: [id])
 
   @@map("users")
@@ -76,4 +103,36 @@ model ApiKey {
   user         User?    @relation(fields: [userId], references: [id])
 
   @@map("api_keys")
+}
+
+model LeadDelivery {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  businessId Int
+  deliveredAt DateTime @default(now()) @db.Timestamptz(6)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, businessId])
+  @@index([userId])
+  @@index([businessId])
+  @@map("lead_deliveries")
+}
+
+model JobRun {
+  id             Int      @id @default(autoincrement())
+  queueName      String
+  jobId          String
+  status         String
+  startedAt      DateTime @default(now()) @db.Timestamptz(6)
+  completedAt    DateTime? @db.Timestamptz(6)
+  durationMs     Int?
+  processedCount Int?
+  errorMessage   String?
+  metadata       Json?
+
+  @@unique([queueName, jobId])
+  @@index([queueName])
+  @@index([status])
+  @@map("job_runs")
 }
