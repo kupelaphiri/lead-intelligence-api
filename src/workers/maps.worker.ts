@@ -34,13 +34,14 @@ export class MapsWorker extends WorkerHost {
     );
 
     for (const business of scraped) {
-      const saved = await this.prisma.upsertBusiness(business);
+      const { enrichmentTarget, ...businessRecord } = business;
+      const saved = await this.prisma.upsertBusiness(businessRecord);
       this.logger.log(`Business saved: ${saved.name}`);
 
-      if (saved.website) {
+      if (enrichmentTarget) {
         await this.enrichmentQueue.enqueueEnrichment({
           businessId: saved.id,
-          website: saved.website,
+          website: enrichmentTarget,
         });
       }
     }

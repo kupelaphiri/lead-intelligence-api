@@ -5,6 +5,7 @@ export interface ScrapedBusiness {
   name: string;
   phone: string | null;
   website: string | null;
+  enrichmentTarget: string | null;
   city: string;
   category: string;
   rating: number | null;
@@ -71,6 +72,7 @@ export class MapsScraper {
             name: details.name,
             phone: details.phone,
             website: details.website,
+            enrichmentTarget: details.enrichmentTarget,
             city,
             category: query,
             rating: details.rating,
@@ -104,6 +106,7 @@ export class MapsScraper {
   }): Promise<{
     name: string;
     website: string | null;
+    enrichmentTarget: string | null;
     phone: string | null;
     rating: number | null;
     reviews: number | null;
@@ -143,7 +146,11 @@ export class MapsScraper {
 
     const name = (await safeText('h1.DUwDvf', 2500)) ?? '';
 
-    const website = await safeAttribute('a[data-item-id="authority"]', 'href');
+    const authorityUrl = await safeAttribute(
+      'a[data-item-id="authority"]',
+      'href',
+    );
+    const classifiedAuthority = this.classifyAuthorityUrl(authorityUrl);
 
     const phone =
       (await safeText('button[data-item-id^="phone"] .Io6YTe')) ??
@@ -161,11 +168,76 @@ export class MapsScraper {
 
     return {
       name,
-      website,
+      website: classifiedAuthority.website,
+      enrichmentTarget: classifiedAuthority.enrichmentTarget,
       phone,
       rating: Number.isFinite(rating) ? rating : null,
       reviews: Number.isFinite(reviews) ? reviews : null,
     };
+  }
+
+  private classifyAuthorityUrl(authorityUrl: string | null): {
+    website: string | null;
+    enrichmentTarget: string | null;
+  } {
+    const normalized = this.normalizeUrl(authorityUrl);
+    if (!normalized) {
+      return {
+        website: null,
+        enrichmentTarget: null,
+      };
+    }
+
+    if (this.isSocialDomain(normalized)) {
+      return {
+        website: null,
+        enrichmentTarget: normalized,
+      };
+    }
+
+    return {
+      website: normalized,
+      enrichmentTarget: normalized,
+    };
+  }
+
+  private normalizeUrl(value: string | null): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      const url = new URL(
+        trimmed.startsWith('http') ? trimmed : `https://${trimmed}`,
+      );
+      url.hash = '';
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  private isSocialDomain(url: string): boolean {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      const socialDomains = [
+        'facebook.com',
+        'fb.com',
+        'instagram.com',
+        'linkedin.com',
+      ];
+
+      return socialDomains.some(
+        (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+      );
+    } catch {
+      return false;
+    }
   }
 
   private uniqueByName(items: ScrapedBusiness[]): ScrapedBusiness[] {
