@@ -3,6 +3,7 @@ import { LeadsService } from './leads.service';
 describe('LeadsService', () => {
   const prisma = {
     findUserById: jest.fn(),
+    refreshUserLeadPeriod: jest.fn(),
     findBusinessesByQueryCity: jest.fn(),
     recordLeadDeliveries: jest.fn(),
     incrementUserLeads: jest.fn(),
@@ -28,10 +29,13 @@ describe('LeadsService', () => {
       emailQualityService as never,
     );
 
-    prisma.findUserById.mockResolvedValue({
+    prisma.refreshUserLeadPeriod.mockResolvedValue({
       id: 7,
       subscriptionStatus: 'active',
       leadsCollected: 0,
+      leadsUsedThisPeriod: 0,
+      currentPeriodStart: new Date('2026-03-01T00:00:00.000Z'),
+      currentPeriodEnd: new Date('2026-03-31T00:00:00.000Z'),
       plan: { name: 'Starter', leadsLimit: 1000 },
     });
     prisma.recordLeadDeliveries.mockResolvedValue(1);

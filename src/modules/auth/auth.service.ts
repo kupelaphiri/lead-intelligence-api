@@ -112,6 +112,9 @@ export class AuthService {
     name: string | null;
     createdAt: Date;
     leadsCollected: number;
+    leadsUsedThisPeriod: number;
+    currentPeriodStart: Date;
+    currentPeriodEnd: Date;
     subscriptionStatus: string;
     subscriptionCanceledAt: Date | null;
     plan?: {
@@ -126,6 +129,9 @@ export class AuthService {
     name: string | null;
     createdAt: Date;
     leadsCollected: number;
+    leadsUsedThisPeriod: number;
+    currentPeriodStart: Date;
+    currentPeriodEnd: Date;
     subscriptionStatus: string;
     subscriptionCanceledAt: Date | null;
     plan: {
@@ -141,6 +147,9 @@ export class AuthService {
       name: user.name,
       createdAt: user.createdAt,
       leadsCollected: user.leadsCollected,
+      leadsUsedThisPeriod: user.leadsUsedThisPeriod,
+      currentPeriodStart: user.currentPeriodStart,
+      currentPeriodEnd: user.currentPeriodEnd,
       subscriptionStatus: user.subscriptionStatus,
       subscriptionCanceledAt: user.subscriptionCanceledAt,
       plan: user.plan ?? null,

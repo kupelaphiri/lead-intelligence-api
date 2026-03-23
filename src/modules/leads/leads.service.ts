@@ -20,6 +20,7 @@ interface LeadsResponse {
   data: unknown[];
   message?: string;
   jobId?: string;
+  partial?: boolean;
   limit: number;
   query: string;
   city: string;
@@ -55,7 +56,7 @@ export class LeadsService {
       throw new UnauthorizedException('User context missing');
     }
 
-    const user = await this.prisma.findUserById(userId);
+    const user = await this.prisma.refreshUserLeadPeriod(userId);
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
@@ -65,9 +66,9 @@ export class LeadsService {
     }
 
     const leadsLimit = user.plan?.leadsLimit ?? null;
-    if (leadsLimit !== null && user.leadsCollected >= leadsLimit) {
+    if (leadsLimit !== null && user.leadsUsedThisPeriod >= leadsLimit) {
       throw new HttpException(
-        `Lead limit reached for ${user.plan?.name ?? 'current'} plan (${leadsLimit} leads).`,
+        `Lead limit reached for ${user.plan?.name ?? 'current'} plan (${leadsLimit} leads this billing period).`,
         429,
       );
     }
@@ -96,9 +97,19 @@ export class LeadsService {
       );
 
       await this.prisma.incrementUserLeads(user.id, newlyDeliveredCount);
+      const hasPartialCache = rankedBusinesses.length < limit;
+      const jobId = hasPartialCache
+        ? await this.mapsQueue.enqueueScrape({ query, city, limit })
+        : undefined;
+
       return {
         status: 'ready',
         data: rankedBusinesses,
+        message: hasPartialCache
+          ? `Returned ${rankedBusinesses.length} cached leads and started a background scrape to fill the remaining ${limit - rankedBusinesses.length}.`
+          : undefined,
+        jobId,
+        partial: hasPartialCache || undefined,
         limit,
         query,
         city,
@@ -112,6 +123,7 @@ export class LeadsService {
         'No cached leads yet. Scraping has started in the background. Retry shortly.',
       data: [],
       jobId,
+      partial: false,
       limit,
       query,
       city,

@@ -84,6 +84,9 @@ model User {
   name                   String?
   planId                 Int?
   leadsCollected         Int       @default(0)
+  leadsUsedThisPeriod    Int       @default(0)
+  currentPeriodStart     DateTime  @default(now()) @db.Timestamptz(6)
+  currentPeriodEnd       DateTime  @db.Timestamptz(6)
   subscriptionStatus     String    @default("active")
   subscriptionCanceledAt DateTime? @db.Timestamptz(6)
   createdAt              DateTime  @default(now()) @db.Timestamptz(6)

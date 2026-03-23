@@ -84,6 +84,7 @@ export class UsersService {
     const normalized = (plan ?? 'Free').trim().toLowerCase();
     const mapping: Record<string, string> = {
       free: 'Free',
+      basic: 'Basic',
       starter: 'Starter',
       growth: 'Growth',
       pro: 'Pro',
@@ -93,7 +94,7 @@ export class UsersService {
     const mapped = mapping[normalized];
     if (!mapped) {
       throw new BadRequestException(
-        'Invalid plan selected. Use Free, Starter, Growth, Pro, or Enterprise.',
+        'Invalid plan selected. Use Free, Basic, Starter, Growth, Pro, or Enterprise.',
       );
     }
 

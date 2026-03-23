@@ -25,6 +25,7 @@ interface LeadsResponse {
   data: unknown[];
   message?: string;
   jobId?: string;
+  partial?: boolean;
   limit: number;
   query: string;
   city: string;

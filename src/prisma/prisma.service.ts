@@ -27,6 +27,9 @@ export interface UserRecord {
   name: string | null;
   planId: number | null;
   leadsCollected: number;
+  leadsUsedThisPeriod: number;
+  currentPeriodStart: Date;
+  currentPeriodEnd: Date;
   subscriptionStatus: string;
   subscriptionCanceledAt: Date | null;
   createdAt: Date;
@@ -137,7 +140,8 @@ export class PrismaService implements OnModuleInit {
       leadsLimit: number | null;
     }> = [
       { name: 'Free', priceMonthlyUsd: 0, leadsLimit: 1000 },
-      { name: 'Starter', priceMonthlyUsd: 49, leadsLimit: 10000 },
+      { name: 'Basic', priceMonthlyUsd: 9, leadsLimit: 2500 },
+      { name: 'Starter', priceMonthlyUsd: 29, leadsLimit: 10000 },
       { name: 'Growth', priceMonthlyUsd: 149, leadsLimit: 50000 },
       { name: 'Pro', priceMonthlyUsd: 399, leadsLimit: 200000 },
       { name: 'Enterprise', priceMonthlyUsd: null, leadsLimit: null },
@@ -222,8 +226,14 @@ export class PrismaService implements OnModuleInit {
     name: string | null;
     planId: number;
   }): Promise<UserWithPlanRecord> {
+    const { start, end } = this.createBillingPeriodWindow();
     return this.client.user.create({
-      data,
+      data: {
+        ...data,
+        leadsUsedThisPeriod: 0,
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+      },
       include: {
         plan: true,
       },
@@ -243,10 +253,14 @@ export class PrismaService implements OnModuleInit {
     userId: number,
     planId: number,
   ): Promise<UserWithPlanRecord> {
+    const { start, end } = this.createBillingPeriodWindow();
     return this.client.user.update({
       where: { id: userId },
       data: {
         planId,
+        leadsUsedThisPeriod: 0,
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
         subscriptionStatus: 'active',
         subscriptionCanceledAt: null,
       },
@@ -280,6 +294,36 @@ export class PrismaService implements OnModuleInit {
         leadsCollected: {
           increment: amount,
         },
+        leadsUsedThisPeriod: {
+          increment: amount,
+        },
+      },
+    });
+  }
+
+  async refreshUserLeadPeriod(
+    userId: number,
+  ): Promise<UserWithPlanRecord | null> {
+    const user = await this.findUserById(userId);
+    if (!user) {
+      return null;
+    }
+
+    const now = new Date();
+    if (user.currentPeriodEnd && new Date(user.currentPeriodEnd) > now) {
+      return user;
+    }
+
+    const { start, end } = this.createBillingPeriodWindow(now);
+    return this.client.user.update({
+      where: { id: userId },
+      data: {
+        leadsUsedThisPeriod: 0,
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+      },
+      include: {
+        plan: true,
       },
     });
   }
@@ -590,5 +634,16 @@ export class PrismaService implements OnModuleInit {
       })),
       recentRuns: runs,
     };
+  }
+
+  private createBillingPeriodWindow(baseDate = new Date()): {
+    start: Date;
+    end: Date;
+  } {
+    const start = new Date(baseDate);
+    const end = new Date(baseDate);
+    end.setUTCDate(end.getUTCDate() + 30);
+
+    return { start, end };
   }
 }
