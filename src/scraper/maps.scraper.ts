@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { chromium } from 'playwright';
+import { AntiDetectionService } from './core/anti-detection.service';
+import { ProxyService } from './core/proxy.service';
 
 export interface ScrapedBusiness {
   name: string;
@@ -11,11 +13,19 @@ export interface ScrapedBusiness {
   rating: number | null;
   reviews: number | null;
   googleMapsUrl: string | null;
+  address?: string | null;
+  priceLevel?: string | null;
+  businessCategory?: string | null;
 }
 
 @Injectable()
 export class MapsScraper {
   private readonly logger = new Logger(MapsScraper.name);
+
+  constructor(
+    private readonly antiDetection: AntiDetectionService,
+    private readonly proxyService: ProxyService,
+  ) {}
 
   async scrape(
     query: string,
@@ -24,12 +34,25 @@ export class MapsScraper {
   ): Promise<ScrapedBusiness[]> {
     this.logger.log(`Launching browser for query="${query}" city="${city}"`);
 
+    const viewport = this.antiDetection.jitteredViewport();
+    const proxy = this.proxyService.random();
     const browser = await chromium.launch({
       headless: true,
       timeout: 30000,
-      args: ['--disable-dev-shm-usage', '--disable-gpu', '--no-sandbox'],
+      args: this.antiDetection.stealthLaunchArgs(),
+      ...(proxy ? { proxy: this.proxyService.toPlaywrightProxy(proxy) } : {}),
     });
-    const context = await browser.newContext();
+
+    const context = await browser.newContext({
+      userAgent: this.antiDetection.randomUserAgent(),
+      viewport,
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+    });
+
+    // Inject stealth fingerprint hardening
+    await context.addInitScript(this.antiDetection.stealthInitScript());
+
     const page = await context.newPage();
     page.setDefaultNavigationTimeout(45000);
     page.setDefaultTimeout(10000);
@@ -46,24 +69,29 @@ export class MapsScraper {
         waitUntil: 'domcontentloaded',
         timeout: 60000,
       });
-      this.logger.log(`Navigation completed: ${page.url()}`);
-      await page.waitForTimeout(1500);
+
+      await this.antiDetection.randomDelay(1200, 2500);
 
       if (this.isBlocked(page.url())) {
-        throw new Error(`Google Maps blocked or challenged the session at ${page.url()}`);
+        throw new Error(
+          `Google Maps blocked or challenged the session at ${page.url()}`,
+        );
       }
+
+      // Accept consent dialog if present
+      await this.dismissConsentDialog(page);
 
       const feed = page.locator('div[role="feed"]');
       const feedCount = await feed.count();
       this.logger.log(`Maps feed count: ${feedCount}`);
 
       if (feedCount > 0) {
-        const scrollIterations = Math.max(6, Math.ceil(maxResults / 8));
+        const scrollIterations = Math.max(8, Math.ceil(maxResults / 7));
         for (let i = 0; i < scrollIterations; i++) {
           await feed.first().evaluate((node) => {
             node.scrollBy(0, node.scrollHeight);
           });
-          await page.waitForTimeout(700);
+          await this.antiDetection.randomDelay(500, 1200);
         }
       }
 
@@ -71,9 +99,9 @@ export class MapsScraper {
       let rawCardCount = await cards.count();
       if (rawCardCount === 0) {
         this.logger.warn(
-          `No map cards detected for query="${query}" city="${city}". Current URL: ${page.url()}`,
+          `No map cards detected for query="${query}" city="${city}". URL: ${page.url()}`,
         );
-        await page.waitForTimeout(2500);
+        await this.antiDetection.randomDelay(2000, 3500);
         rawCardCount = await cards.count();
       }
 
@@ -81,19 +109,15 @@ export class MapsScraper {
       this.logger.log(`Found ${cardCount} candidate map cards`);
 
       for (let i = 0; i < cardCount; i++) {
-        if (collected.length >= maxResults) {
-          break;
-        }
+        if (collected.length >= maxResults) break;
 
         const card = cards.nth(i);
         try {
           await card.click({ timeout: 3500 });
-          await page.waitForTimeout(400);
+          await this.antiDetection.randomDelay(300, 700);
 
           const details = await this.extractDetailsFromDetailsPane(page);
-          if (!details.name) {
-            continue;
-          }
+          if (!details.name) continue;
 
           collected.push({
             name: details.name,
@@ -105,7 +129,11 @@ export class MapsScraper {
             rating: details.rating,
             reviews: details.reviews,
             googleMapsUrl: page.url(),
+            address: details.address,
+            priceLevel: details.priceLevel,
+            businessCategory: details.businessCategory,
           });
+
           this.logger.debug(
             `Collected business ${collected.length}/${maxResults}: ${details.name}`,
           );
@@ -116,7 +144,9 @@ export class MapsScraper {
         }
       }
 
-      this.logger.log(`Maps scrape finished with ${collected.length} raw businesses`);
+      this.logger.log(
+        `Maps scrape finished with ${collected.length} raw businesses`,
+      );
       return this.uniqueByName(collected).slice(0, maxResults);
     } catch (error) {
       this.logger.error(
@@ -129,16 +159,29 @@ export class MapsScraper {
     }
   }
 
+  private async dismissConsentDialog(page: {
+    locator: (selector: string) => { count: () => Promise<number>; click: (opts?: any) => Promise<void> };
+  }): Promise<void> {
+    try {
+      const acceptBtn = page.locator('button[aria-label*="Accept"], button[jsname="higCR"]');
+      if ((await acceptBtn.count()) > 0) {
+        await acceptBtn.click({ timeout: 3000 });
+      }
+    } catch {
+      // No consent dialog present
+    }
+  }
+
   private async extractDetailsFromDetailsPane(page: {
     locator: (selector: string) => {
       first: () => {
         textContent: (options?: { timeout?: number }) => Promise<string | null>;
-        getAttribute: (
-          name: string,
-          options?: { timeout?: number },
-        ) => Promise<string | null>;
+        getAttribute: (name: string, options?: { timeout?: number }) => Promise<string | null>;
       };
+      count: () => Promise<number>;
+      nth: (n: number) => { textContent: (opts?: { timeout?: number }) => Promise<string | null> };
     };
+    url: () => string;
   }): Promise<{
     name: string;
     website: string | null;
@@ -146,6 +189,9 @@ export class MapsScraper {
     phone: string | null;
     rating: number | null;
     reviews: number | null;
+    address: string | null;
+    priceLevel: string | null;
+    businessCategory: string | null;
   }> {
     const safeText = async (
       selector: string,
@@ -202,6 +248,20 @@ export class MapsScraper {
       ? Number.parseInt(reviewsRaw.replace(/[^0-9]/g, ''), 10)
       : null;
 
+    // Address: data-item-id="address" or aria-label containing "Address"
+    const address =
+      (await safeText('button[data-item-id="address"] .Io6YTe')) ??
+      (await safeText('[data-item-id="address"]')) ??
+      (await safeText('button[aria-label*="Address"] .Io6YTe'));
+
+    // Price level: "$", "$$", "$$$"
+    const priceLevel = await safeText('span[aria-label*="Price"]');
+
+    // Business category (e.g. "Dental clinic", "Restaurant")
+    const businessCategory =
+      (await safeText('button.DkEaL')) ??
+      (await safeText('[jsaction*="category"] span'));
+
     return {
       name,
       website: classifiedAuthority.website,
@@ -209,6 +269,9 @@ export class MapsScraper {
       phone,
       rating: Number.isFinite(rating) ? rating : null,
       reviews: Number.isFinite(reviews) ? reviews : null,
+      address,
+      priceLevel,
+      businessCategory,
     };
   }
 
@@ -218,34 +281,21 @@ export class MapsScraper {
   } {
     const normalized = this.normalizeUrl(authorityUrl);
     if (!normalized) {
-      return {
-        website: null,
-        enrichmentTarget: null,
-      };
+      return { website: null, enrichmentTarget: null };
     }
 
     if (this.isSocialDomain(normalized)) {
-      return {
-        website: null,
-        enrichmentTarget: normalized,
-      };
+      return { website: null, enrichmentTarget: normalized };
     }
 
-    return {
-      website: normalized,
-      enrichmentTarget: normalized,
-    };
+    return { website: normalized, enrichmentTarget: normalized };
   }
 
   private normalizeUrl(value: string | null): string | null {
-    if (!value) {
-      return null;
-    }
+    if (!value) return null;
 
     const trimmed = value.trim();
-    if (!trimmed) {
-      return null;
-    }
+    if (!trimmed) return null;
 
     try {
       const url = new URL(
@@ -266,8 +316,9 @@ export class MapsScraper {
         'fb.com',
         'instagram.com',
         'linkedin.com',
+        'twitter.com',
+        'x.com',
       ];
-
       return socialDomains.some(
         (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
       );
@@ -282,9 +333,7 @@ export class MapsScraper {
 
     for (const item of items) {
       const key = `${item.name.toLowerCase()}|${item.city.toLowerCase()}|${item.category.toLowerCase()}`;
-      if (seen.has(key)) {
-        continue;
-      }
+      if (seen.has(key)) continue;
       seen.add(key);
       output.push(item);
     }

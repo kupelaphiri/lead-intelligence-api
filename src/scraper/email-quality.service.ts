@@ -11,13 +11,21 @@ export interface EmailAssessment {
 @Injectable()
 export class EmailQualityService {
   private readonly syntaxRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+
   private readonly suppressedLocalPartPatterns = [
     /^no-?reply$/,
     /^do-?not-?reply$/,
     /^test$/,
     /^example$/,
     /^dummy$/,
+    /^bounce$/,
+    /^postmaster$/,
+    /^mailer-daemon$/,
+    /^abuse$/,
+    /^spam$/,
+    /^webmaster$/,
   ];
+
   private readonly disposableDomains = new Set([
     'mailinator.com',
     'guerrillamail.com',
@@ -25,18 +33,61 @@ export class EmailQualityService {
     'temp-mail.org',
     'tempmail.com',
     'yopmail.com',
+    'throwam.com',
+    'sharklasers.com',
+    'guerrillamailblock.com',
+    'grr.la',
+    'guerrillamail.info',
+    'guerrillamail.biz',
+    'guerrillamail.de',
+    'guerrillamail.net',
+    'guerrillamail.org',
+    'spam4.me',
+    'trashmail.at',
+    'trashmail.com',
+    'trashmail.io',
+    'trashmail.me',
+    'trashmail.net',
+    'dispostable.com',
+    'fakeinbox.com',
+    'mailnull.com',
+    'spamgourmet.com',
+    'spamgourmet.net',
+    'spamgourmet.org',
+    'sspam.com',
+    'jetable.fr.nf',
+    'nomail.xl.cx',
+    'maildrop.cc',
+    'harakirimail.com',
+    'mt2015.com',
   ]);
+
   private readonly freeEmailDomains = new Set([
     'gmail.com',
     'yahoo.com',
+    'yahoo.co.uk',
+    'yahoo.co.za',
+    'yahoo.fr',
+    'yahoo.de',
     'hotmail.com',
+    'hotmail.co.uk',
+    'hotmail.fr',
     'outlook.com',
+    'outlook.co.za',
     'live.com',
+    'live.co.uk',
+    'msn.com',
     'icloud.com',
+    'me.com',
+    'mac.com',
     'aol.com',
     'proton.me',
     'protonmail.com',
+    'pm.me',
+    'zoho.com',
+    'zohomail.com',
   ]);
+
   private readonly roleBasedLocalParts = new Set([
     'info',
     'sales',
@@ -47,6 +98,30 @@ export class EmailQualityService {
     'office',
     'team',
     'marketing',
+    'service',
+    'help',
+    'enquiries',
+    'enquiry',
+    'reception',
+    'general',
+    'mail',
+    'booking',
+    'bookings',
+    'reservations',
+    'billing',
+    'accounts',
+    'hr',
+    'jobs',
+    'careers',
+    'press',
+    'media',
+    'privacy',
+    'legal',
+    'compliance',
+    'security',
+    'partnerships',
+    'partner',
+    'feedback',
   ]);
 
   assess(email: string, businessWebsite?: string | null): EmailAssessment {
@@ -63,8 +138,7 @@ export class EmailQualityService {
       };
     }
 
-    const [localPart, domain] = normalized.split('@');
-    let score = 40;
+    const [localPart, domain] = normalized.split('@') as [string, string];
 
     if (!localPart || !domain) {
       return {
@@ -76,31 +150,44 @@ export class EmailQualityService {
       };
     }
 
+    // Hard suppressions
     if (
       this.suppressedLocalPartPatterns.some((pattern) =>
         pattern.test(localPart),
       )
     ) {
-      reasons.push('suppressed-local-part');
       return {
         email: normalized,
         score: 0,
         quality: 'suppressed',
         suppressed: true,
-        reasons,
+        reasons: ['suppressed-local-part'],
       };
     }
 
     if (this.disposableDomains.has(domain)) {
-      reasons.push('disposable-domain');
       return {
         email: normalized,
         score: 0,
         quality: 'suppressed',
         suppressed: true,
-        reasons,
+        reasons: ['disposable-domain'],
       };
     }
+
+    // TLD sanity check — avoid numeric TLDs or very long ones
+    const tld = domain.split('.').pop() ?? '';
+    if (tld.length > 8 || /^\d+$/.test(tld)) {
+      return {
+        email: normalized,
+        score: 0,
+        quality: 'suppressed',
+        suppressed: true,
+        reasons: ['suspicious-tld'],
+      };
+    }
+
+    let score = 40;
 
     if (this.roleBasedLocalParts.has(localPart)) {
       score -= 10;
@@ -127,6 +214,12 @@ export class EmailQualityService {
       reasons.push('domain-mismatch');
     }
 
+    // Bonus: short, clean local part suggests a real name (e.g. john.smith)
+    if (/^[a-z]+\.[a-z]+$/.test(localPart) || /^[a-z]+_[a-z]+$/.test(localPart)) {
+      score += 5;
+      reasons.push('structured-name');
+    }
+
     const quality = score >= 65 ? 'high' : score >= 45 ? 'medium' : 'low';
 
     return {
@@ -142,9 +235,7 @@ export class EmailQualityService {
     emailDomain: string,
     businessWebsite?: string | null,
   ): boolean {
-    if (!businessWebsite) {
-      return false;
-    }
+    if (!businessWebsite) return false;
 
     try {
       const websiteHost = new URL(

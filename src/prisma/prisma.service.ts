@@ -50,6 +50,9 @@ export interface EnrichmentRecord {
   instagram: string | null;
   facebook: string | null;
   linkedin: string | null;
+  twitter: string | null;
+  youtube: string | null;
+  tiktok: string | null;
   lastChecked: Date;
 }
 
@@ -61,6 +64,7 @@ export interface BusinessContactRecord {
   email: string | null;
   phone: string | null;
   linkedin: string | null;
+  twitter: string | null;
   sourceUrl: string;
   sourceType: string;
   sourcePage: string | null;
@@ -81,6 +85,9 @@ export interface BusinessRecord {
   rating: number | null;
   reviews: number | null;
   googleMapsUrl: string | null;
+  address: string | null;
+  businessCategory: string | null;
+  priceLevel: string | null;
   scrapedAt: Date;
 }
 
@@ -107,6 +114,7 @@ export interface JobRunRecord {
   processedCount: number | null;
   errorMessage: string | null;
   metadata: unknown;
+  webhookUrl: string | null;
 }
 
 @Injectable()
@@ -358,6 +366,9 @@ export class PrismaService implements OnModuleInit {
     rating: number | null;
     reviews: number | null;
     googleMapsUrl: string | null;
+    address?: string | null;
+    businessCategory?: string | null;
+    priceLevel?: string | null;
   }): Promise<BusinessRecord> {
     return this.client.business.upsert({
       where: {
@@ -377,6 +388,9 @@ export class PrismaService implements OnModuleInit {
         rating: data.rating,
         reviews: data.reviews,
         googleMapsUrl: data.googleMapsUrl,
+        address: data.address ?? null,
+        businessCategory: data.businessCategory ?? null,
+        priceLevel: data.priceLevel ?? null,
         scrapedAt: new Date(),
       },
     });
@@ -388,6 +402,9 @@ export class PrismaService implements OnModuleInit {
     instagram: string | null;
     facebook: string | null;
     linkedin: string | null;
+    twitter?: string | null;
+    youtube?: string | null;
+    tiktok?: string | null;
   }): Promise<EnrichmentRecord> {
     return this.client.enrichment.upsert({
       where: { businessId: data.businessId },
@@ -400,6 +417,9 @@ export class PrismaService implements OnModuleInit {
         instagram: data.instagram,
         facebook: data.facebook,
         linkedin: data.linkedin,
+        twitter: data.twitter ?? null,
+        youtube: data.youtube ?? null,
+        tiktok: data.tiktok ?? null,
         lastChecked: new Date(),
       },
     });
@@ -413,6 +433,7 @@ export class PrismaService implements OnModuleInit {
       email: string | null;
       phone: string | null;
       linkedin: string | null;
+      twitter?: string | null;
       sourceUrl: string;
       sourceType: string;
       sourcePage: string | null;
@@ -439,6 +460,7 @@ export class PrismaService implements OnModuleInit {
           email: contact.email,
           phone: contact.phone,
           linkedin: contact.linkedin,
+          twitter: contact.twitter ?? null,
           sourceUrl: contact.sourceUrl,
           sourceType: contact.sourceType,
           sourcePage: contact.sourcePage,
@@ -496,6 +518,7 @@ export class PrismaService implements OnModuleInit {
     queueName: string;
     jobId: string;
     metadata?: unknown;
+    webhookUrl?: string | null;
   }): Promise<JobRunRecord> {
     return this.client.jobRun.upsert({
       where: {
@@ -510,6 +533,7 @@ export class PrismaService implements OnModuleInit {
         status: 'running',
         startedAt: new Date(),
         metadata: data.metadata,
+        webhookUrl: data.webhookUrl ?? null,
       },
       update: {
         status: 'running',
@@ -519,6 +543,7 @@ export class PrismaService implements OnModuleInit {
         processedCount: null,
         errorMessage: null,
         metadata: data.metadata,
+        webhookUrl: data.webhookUrl ?? null,
       },
     });
   }
@@ -634,6 +659,20 @@ export class PrismaService implements OnModuleInit {
       })),
       recentRuns: runs,
     };
+  }
+
+  async findJobRunByJobId(jobId: string): Promise<JobRunRecord | null> {
+    return this.client.jobRun.findFirst({
+      where: { jobId },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
+  async findJobRunsByJobIds(jobIds: string[]): Promise<JobRunRecord[]> {
+    return this.client.jobRun.findMany({
+      where: { jobId: { in: jobIds } },
+      orderBy: { startedAt: 'desc' },
+    });
   }
 
   private createBillingPeriodWindow(baseDate = new Date()): {

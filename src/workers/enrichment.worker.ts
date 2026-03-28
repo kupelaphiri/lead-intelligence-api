@@ -1,6 +1,7 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { WebhookService } from '../modules/webhooks/webhook.service';
 import { ENRICHMENT_QUEUE } from '../queue/queue.constants';
 import { EnrichmentJobPayload } from '../queue/queue.types';
 import { EnrichmentService } from '../modules/enrichment/enrichment.service';
@@ -14,6 +15,7 @@ export class EnrichmentWorker extends WorkerHost {
   constructor(
     private readonly enrichmentService: EnrichmentService,
     private readonly prisma: PrismaService,
+    private readonly webhookService: WebhookService,
   ) {
     super();
   }
@@ -36,19 +38,46 @@ export class EnrichmentWorker extends WorkerHost {
         job.data.website,
       );
 
-      await this.prisma.finishJobRun({
+      const completedRun = await this.prisma.finishJobRun({
         queueName: ENRICHMENT_QUEUE,
         jobId,
         status: 'completed',
         processedCount: 1,
       });
+
+      if (completedRun.webhookUrl) {
+        void this.webhookService.send(completedRun.webhookUrl, {
+          event: 'job.completed',
+          jobId,
+          queueName: ENRICHMENT_QUEUE,
+          status: 'completed',
+          processedCount: 1,
+          completedAt: new Date().toISOString(),
+          durationMs: completedRun.durationMs,
+          metadata: completedRun.metadata,
+        });
+      }
     } catch (error) {
-      await this.prisma.finishJobRun({
+      const failedRun = await this.prisma.finishJobRun({
         queueName: ENRICHMENT_QUEUE,
         jobId,
         status: 'failed',
         errorMessage: error instanceof Error ? error.message : 'unknown error',
       });
+
+      if (failedRun.webhookUrl) {
+        void this.webhookService.send(failedRun.webhookUrl, {
+          event: 'job.failed',
+          jobId,
+          queueName: ENRICHMENT_QUEUE,
+          status: 'failed',
+          errorMessage: error instanceof Error ? error.message : 'unknown error',
+          completedAt: new Date().toISOString(),
+          durationMs: failedRun.durationMs,
+          metadata: failedRun.metadata,
+        });
+      }
+
       throw error;
     }
   }

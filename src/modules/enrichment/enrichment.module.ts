@@ -1,4 +1,8 @@
 import { Module } from '@nestjs/common';
+import { AntiDetectionService } from '../../scraper/core/anti-detection.service';
+import { PhoneService } from '../../scraper/core/phone.service';
+import { ProxyService } from '../../scraper/core/proxy.service';
+import { RateLimiterService } from '../../scraper/core/rate-limiter.service';
 import { ContactExtractor } from '../../scraper/contact.extractor';
 import { EmailExtractor } from '../../scraper/email.extractor';
 import { EmailQualityService } from '../../scraper/email-quality.service';
@@ -12,6 +16,10 @@ import { EnrichmentService } from './enrichment.service';
 @Module({
   imports: [QueueModule],
   providers: [
+    AntiDetectionService,
+    PhoneService,
+    ProxyService,
+    RateLimiterService,
     EnrichmentService,
     WebsiteCrawler,
     ContactExtractor,

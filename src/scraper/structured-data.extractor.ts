@@ -167,6 +167,7 @@ export class StructuredDataExtractor {
       email,
       phone,
       linkedin,
+      twitter: null,
       sourceUrl,
       sourceType: 'structured-data',
       sourcePage: 'structured-data',

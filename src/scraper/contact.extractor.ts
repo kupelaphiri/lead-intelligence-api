@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as cheerio from 'cheerio';
+import { PhoneService } from './core/phone.service';
 
 export interface ExtractedContact {
   name: string | null;
@@ -7,6 +8,7 @@ export interface ExtractedContact {
   email: string | null;
   phone: string | null;
   linkedin: string | null;
+  twitter: string | null;
   sourceUrl: string;
   sourceType: string;
   sourcePage: string | null;
@@ -20,21 +22,53 @@ export interface ExtractedContact {
 export class ContactExtractor {
   private readonly emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
   private readonly phoneRegex =
-    /(?:\+?\d{1,3}[\s().-]*)?(?:\d[\s().-]*){7,15}/g;
+    /(?:\+?\d{1,3}[\s().-]*)?\(?\d{2,4}\)?[\s().-]*\d{2,4}[\s().-]*\d{2,9}/g;
+
+  constructor(private readonly phoneService: PhoneService) {}
+
   private readonly titleKeywords = [
+    // Executive / founder
     'owner',
     'founder',
     'co-founder',
     'ceo',
+    'chief executive',
     'chief executive officer',
+    'cto',
+    'chief technology',
+    'cfo',
+    'chief financial',
+    'coo',
+    'chief operating',
+    'cmo',
+    'chief marketing',
+    // Director
     'director',
     'managing director',
-    'marketing',
+    'executive director',
+    'board member',
+    // Vice president / senior
+    'vp',
+    'vice president',
+    'svp',
+    'evp',
+    'senior vice president',
+    // Management
     'head of',
     'manager',
+    'general manager',
+    'operations manager',
+    'account manager',
+    // Commercial
+    'marketing',
     'sales',
     'business development',
+    'partnerships',
+    // Other
     'principal',
+    'partner',
+    'consultant',
+    'president',
   ];
 
   extract(
@@ -46,8 +80,9 @@ export class ContactExtractor {
     const candidates = new Map<string, ExtractedContact>();
     const blocks = new Set<any>();
 
+    // High-signal blocks: person cards and contact elements
     $(
-      '[href^="mailto:"], [href*="linkedin.com/"], .team, .member, .staff, .person',
+      '[href^="mailto:"], [href*="linkedin.com/in/"], [href*="twitter.com/"], [href*="x.com/"], .team, .member, .staff, .person, .employee, [class*="team-member"], [class*="person-card"], [class*="bio"], [class*="profile"]',
     ).each((_, element) => {
       const block =
         $(element).closest(
@@ -65,17 +100,17 @@ export class ContactExtractor {
     for (const block of blocks) {
       const node = $(block);
       const text = this.cleanText(node.text());
-      if (!text) {
-        continue;
-      }
+      if (!text) continue;
 
       const email =
         this.extractFirstEmail(node.html() ?? '') ??
         this.extractFirstEmail(text);
       const linkedin = this.extractLinkedin(node, sourceUrl);
-      const phone =
-        this.extractFirstPhone(node.html() ?? '') ??
-        this.extractFirstPhone(text);
+      const twitter = this.extractTwitter(node, sourceUrl);
+      const rawPhone =
+        this.extractBestPhone(node.html() ?? '') ??
+        this.extractBestPhone(text);
+      const phone = rawPhone;
       const title = this.extractTitle(text);
       const name = this.extractName(text, email);
       const sourcePage = this.classifySourcePage(sourceUrl);
@@ -83,9 +118,7 @@ export class ContactExtractor {
       const roleCategory = this.classifyRoleCategory(title);
       const domainMatches = this.domainMatchesBusiness(email, businessWebsite);
 
-      if (!email && !linkedin && !phone) {
-        continue;
-      }
+      if (!email && !linkedin && !rawPhone && !twitter) continue;
 
       const contact: ExtractedContact = {
         name,
@@ -93,6 +126,7 @@ export class ContactExtractor {
         email,
         phone,
         linkedin,
+        twitter,
         sourceUrl,
         sourceType: 'website',
         sourcePage,
@@ -106,6 +140,7 @@ export class ContactExtractor {
           email,
           phone,
           linkedin,
+          twitter,
           sourcePage,
           emailType,
           roleCategory,
@@ -113,16 +148,16 @@ export class ContactExtractor {
         }),
       };
 
-      if (contact.confidence < 25) {
-        continue;
-      }
+      if (contact.confidence < 25) continue;
 
       const key = [
         contact.email ?? '',
         contact.linkedin ?? '',
+        contact.twitter ?? '',
         contact.name ?? '',
         contact.sourceUrl,
       ].join('|');
+
       const previous = candidates.get(key);
       if (!previous || previous.confidence < contact.confidence) {
         candidates.set(key, contact);
@@ -134,24 +169,23 @@ export class ContactExtractor {
 
   private extractFirstEmail(value: string): string | null {
     const match = value.match(this.emailRegex);
-    if (!match) {
-      return null;
-    }
-
-    return match[0]?.toLowerCase() ?? null;
+    return match?.[0]?.toLowerCase() ?? null;
   }
 
-  private extractFirstPhone(value: string): string | null {
+  private extractBestPhone(value: string): string | null {
+    const normalized = this.phoneService.extractFirst(value);
+    if (normalized) return normalized.international;
+
+    // Fallback to regex if libphonenumber can't parse
     const matches = value.match(this.phoneRegex);
-    if (!matches) {
-      return null;
-    }
+    if (!matches) return null;
 
-    const candidate = matches
-      .map((match) => match.trim())
-      .find((match) => match.replace(/\D/g, '').length >= 7);
-
-    return candidate ?? null;
+    return (
+      matches
+        .map((m) => m.trim())
+        .filter((m) => m.replace(/\D/g, '').length >= 7)
+        .sort((a, b) => b.replace(/\D/g, '').length - a.replace(/\D/g, '').length)[0] ?? null
+    );
   }
 
   private extractLinkedin(
@@ -159,14 +193,40 @@ export class ContactExtractor {
     sourceUrl: string,
   ): string | null {
     const href =
-      node.find('a[href*="linkedin.com/"]').first().attr('href') ?? null;
-    if (!href) {
-      return null;
-    }
+      node.find('a[href*="linkedin.com/in/"]').first().attr('href') ?? null;
+    if (!href) return null;
 
     try {
       const url = new URL(href, sourceUrl);
       url.hash = '';
+      url.search = '';
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  private extractTwitter(
+    node: cheerio.Cheerio<any>,
+    sourceUrl: string,
+  ): string | null {
+    const href =
+      node
+        .find('a[href*="twitter.com/"], a[href*="x.com/"]')
+        .not('[href*="/share"], [href*="/intent/"]')
+        .first()
+        .attr('href') ?? null;
+
+    if (!href) return null;
+
+    try {
+      const url = new URL(href, sourceUrl);
+      // Skip share/intent URLs
+      if (url.pathname.includes('/share') || url.pathname.includes('/intent')) {
+        return null;
+      }
+      url.hash = '';
+      url.search = '';
       return url.toString();
     } catch {
       return null;
@@ -178,9 +238,7 @@ export class ContactExtractor {
     const matches = this.titleKeywords.filter((keyword) =>
       lowered.includes(keyword),
     );
-    if (matches.length === 0) {
-      return null;
-    }
+    if (matches.length === 0) return null;
 
     const lines = text
       .split('\n')
@@ -202,50 +260,48 @@ export class ContactExtractor {
       .map((line) => this.cleanText(line))
       .filter(Boolean);
 
-    for (const line of lines.slice(0, 6)) {
-      if (line.length < 3 || line.length > 80) {
-        continue;
-      }
+    for (const line of lines.slice(0, 8)) {
+      if (line.length < 3 || line.length > 80) continue;
+      if (email && line.toLowerCase().includes(email.toLowerCase())) continue;
 
-      if (email && line.toLowerCase().includes(email.toLowerCase())) {
-        continue;
-      }
-
-      if (/[^A-Za-z.' -]/.test(line)) {
-        continue;
-      }
+      // Must be purely alphabetic / name-like characters
+      if (/[^A-Za-z.' \-]/.test(line)) continue;
 
       const words = line.split(/\s+/).filter(Boolean);
-      if (words.length < 2 || words.length > 4) {
-        continue;
-      }
+      if (words.length < 2 || words.length > 5) continue;
 
       if (
         words.every(
           (word) =>
-            /^[A-Z][A-Za-z.'-]+$/.test(word) ||
-            ['de', 'van', 'von', 'da', 'di'].includes(word.toLowerCase()),
+            /^[A-Z][A-Za-z.'\-]+$/.test(word) ||
+            ['de', 'van', 'von', 'da', 'di', 'du', 'la', 'le'].includes(
+              word.toLowerCase(),
+            ),
         )
       ) {
         return line;
       }
     }
 
-    if (!email) {
-      return null;
-    }
+    if (!email) return null;
 
     const localPart = email.split('@')[0] ?? '';
-    const normalized = localPart.replace(/[._-]+/g, ' ').trim();
+    const normalized = localPart.replace(/[._\-+]+/g, ' ').trim();
+
     if (
       !normalized ||
-      /^(info|sales|hello|support|contact|admin)$/.test(normalized)
+      /^(info|sales|hello|support|contact|admin|office|team|noreply|no-reply)$/.test(
+        normalized,
+      )
     ) {
       return null;
     }
 
-    return normalized
-      .split(/\s+/)
+    // Only use email-derived name if it looks like a real name (2+ parts)
+    const parts = normalized.split(/\s+/).filter(Boolean);
+    if (parts.length < 2) return null;
+
+    return parts
       .map((part) =>
         part.length > 1 ? part[0].toUpperCase() + part.slice(1) : part,
       )
@@ -259,6 +315,7 @@ export class ContactExtractor {
     email: string | null;
     phone: string | null;
     linkedin: string | null;
+    twitter: string | null;
     sourcePage: string | null;
     emailType: string | null;
     roleCategory: string | null;
@@ -269,7 +326,6 @@ export class ContactExtractor {
 
     if (contact.email) {
       score += 35;
-
       if (contact.emailType === 'role-based') {
         score -= 10;
       } else {
@@ -277,37 +333,27 @@ export class ContactExtractor {
       }
     }
 
-    if (contact.linkedin) {
-      score += 20;
-    }
+    if (contact.linkedin) score += 20;
+    if (contact.twitter) score += 8;
+    if (contact.phone) score += 10;
+    if (contact.name) score += 15;
+    if (contact.title) score += 15;
 
-    if (contact.phone) {
-      score += 10;
-    }
+    if (contact.roleCategory === 'decision-maker') score += 10;
+    if (contact.roleCategory === 'commercial') score += 5;
 
-    if (contact.name) {
-      score += 15;
-    }
+    if (contact.domainMatches) score += 10;
 
-    if (contact.title) {
-      score += 15;
-    }
-
-    if (contact.roleCategory === 'decision-maker') {
-      score += 10;
-    }
-
-    if (contact.domainMatches) {
-      score += 10;
-    }
-
-    if (contact.sourcePage === 'team' || contact.sourcePage === 'leadership') {
+    if (
+      contact.sourcePage === 'team' ||
+      contact.sourcePage === 'leadership'
+    ) {
       score += 10;
     }
 
     if (
-      ['team', 'about', 'leadership', 'founder', 'contact'].some((keyword) =>
-        lowerUrl.includes(keyword),
+      ['team', 'about', 'leadership', 'founder', 'contact', 'people', 'management'].some(
+        (keyword) => lowerUrl.includes(keyword),
       )
     ) {
       score += 10;
@@ -323,23 +369,20 @@ export class ContactExtractor {
   private classifySourcePage(sourceUrl: string): string | null {
     const lower = sourceUrl.toLowerCase();
 
-    if (lower.includes('leadership') || lower.includes('founder')) {
+    if (lower.includes('leadership') || lower.includes('founder') || lower.includes('executives')) {
       return 'leadership';
     }
 
     if (
-      ['team', 'staff', 'our-people', 'meet-the-team'].some((keyword) =>
-        lower.includes(keyword),
+      ['team', 'staff', 'our-people', 'meet-the-team', 'management', 'people', 'directory'].some(
+        (keyword) => lower.includes(keyword),
       )
     ) {
       return 'team';
     }
 
-    if (lower.includes('contact')) {
-      return 'contact';
-    }
-
-    if (lower.includes('about') || lower.includes('our-story')) {
+    if (lower.includes('contact')) return 'contact';
+    if (lower.includes('about') || lower.includes('our-story') || lower.includes('who-we-are')) {
       return 'about';
     }
 
@@ -347,28 +390,25 @@ export class ContactExtractor {
   }
 
   private classifyEmailType(email: string | null): string | null {
-    if (!email) {
-      return null;
-    }
+    if (!email) return null;
 
     const localPart = (email.split('@')[0] ?? '').toLowerCase();
-    if (
-      /^(info|sales|hello|support|contact|admin|office|team)$/.test(localPart)
-    ) {
-      return 'role-based';
-    }
 
-    return 'person-based';
+    const roleBased =
+      /^(info|sales|hello|support|contact|admin|office|team|marketing|service|enquiries|enquiry|reception|general|help|mail|booking|bookings|reservations|billing|accounts|hr|jobs|careers)$/.test(
+        localPart,
+      );
+
+    return roleBased ? 'role-based' : 'person-based';
   }
 
   private classifyRoleCategory(title: string | null): string | null {
-    if (!title) {
-      return null;
-    }
+    if (!title) return null;
 
     const lower = title.toLowerCase();
+
     if (
-      ['owner', 'founder', 'co-founder', 'ceo', 'director', 'principal'].some(
+      ['owner', 'founder', 'co-founder', 'ceo', 'director', 'principal', 'president', 'partner', 'cto', 'cfo', 'coo', 'cmo'].some(
         (keyword) => lower.includes(keyword),
       )
     ) {
@@ -376,14 +416,14 @@ export class ContactExtractor {
     }
 
     if (
-      ['marketing', 'sales', 'business development'].some((keyword) =>
-        lower.includes(keyword),
+      ['marketing', 'sales', 'business development', 'partnerships', 'commercial'].some(
+        (keyword) => lower.includes(keyword),
       )
     ) {
       return 'commercial';
     }
 
-    if (['manager', 'head of'].some((keyword) => lower.includes(keyword))) {
+    if (['manager', 'head of', 'vp', 'vice president'].some((keyword) => lower.includes(keyword))) {
       return 'manager';
     }
 
@@ -394,9 +434,7 @@ export class ContactExtractor {
     email: string | null,
     businessWebsite?: string,
   ): boolean {
-    if (!email || !businessWebsite) {
-      return false;
-    }
+    if (!email || !businessWebsite) return false;
 
     try {
       const emailDomain = email.split('@')[1]?.toLowerCase();
@@ -408,9 +446,7 @@ export class ContactExtractor {
         .toLowerCase()
         .replace(/^www\./, '');
 
-      if (!emailDomain) {
-        return false;
-      }
+      if (!emailDomain) return false;
 
       return (
         emailDomain === websiteHost || emailDomain.endsWith(`.${websiteHost}`)

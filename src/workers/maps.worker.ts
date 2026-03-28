@@ -1,6 +1,7 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { WebhookService } from '../modules/webhooks/webhook.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentQueue } from '../queue/enrichment.queue';
 import { MAPS_SCRAPE_JOB, MAPS_SCRAPE_QUEUE } from '../queue/queue.constants';
@@ -16,6 +17,7 @@ export class MapsWorker extends WorkerHost {
     private readonly mapsScraper: MapsScraper,
     private readonly prisma: PrismaService,
     private readonly enrichmentQueue: EnrichmentQueue,
+    private readonly webhookService: WebhookService,
   ) {
     super();
   }
@@ -58,22 +60,50 @@ export class MapsWorker extends WorkerHost {
         }
       }
 
-      await this.prisma.finishJobRun({
+      const completedRun = await this.prisma.finishJobRun({
         queueName: MAPS_SCRAPE_QUEUE,
         jobId,
         status: 'completed',
         processedCount: scraped.length,
       });
+
+      if (completedRun.webhookUrl) {
+        void this.webhookService.send(completedRun.webhookUrl, {
+          event: 'job.completed',
+          jobId,
+          queueName: MAPS_SCRAPE_QUEUE,
+          status: 'completed',
+          processedCount: scraped.length,
+          completedAt: new Date().toISOString(),
+          durationMs: completedRun.durationMs,
+          metadata: completedRun.metadata,
+        });
+      }
+
       this.logger.log(
         `Scraping completed: query=${job.data.query}, city=${job.data.city}, results=${scraped.length}`,
       );
     } catch (error) {
-      await this.prisma.finishJobRun({
+      const failedRun = await this.prisma.finishJobRun({
         queueName: MAPS_SCRAPE_QUEUE,
         jobId,
         status: 'failed',
         errorMessage: error instanceof Error ? error.message : 'unknown error',
       });
+
+      if (failedRun.webhookUrl) {
+        void this.webhookService.send(failedRun.webhookUrl, {
+          event: 'job.failed',
+          jobId,
+          queueName: MAPS_SCRAPE_QUEUE,
+          status: 'failed',
+          errorMessage: error instanceof Error ? error.message : 'unknown error',
+          completedAt: new Date().toISOString(),
+          durationMs: failedRun.durationMs,
+          metadata: failedRun.metadata,
+        });
+      }
+
       throw error;
     }
   }

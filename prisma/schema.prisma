@@ -8,19 +8,22 @@ datasource db {
 }
 
 model Business {
-  id            Int         @id @default(autoincrement())
-  name          String
-  phone         String?
-  website       String?
-  city          String
-  category      String
-  rating        Float?
-  reviews       Int?
-  googleMapsUrl String?
-  scrapedAt     DateTime    @default(now()) @db.Timestamptz(6)
-  enrichment    Enrichment?
-  contacts      BusinessContact[]
-  deliveries    LeadDelivery[]
+  id               Int         @id @default(autoincrement())
+  name             String
+  phone            String?
+  website          String?
+  city             String
+  category         String
+  rating           Float?
+  reviews          Int?
+  googleMapsUrl    String?
+  address          String?
+  businessCategory String?
+  priceLevel       String?
+  scrapedAt        DateTime    @default(now()) @db.Timestamptz(6)
+  enrichment       Enrichment?
+  contacts         BusinessContact[]
+  deliveries       LeadDelivery[]
 
   @@unique([name, city, category])
   @@index([name])
@@ -36,6 +39,9 @@ model Enrichment {
   instagram   String?
   facebook    String?
   linkedin    String?
+  twitter     String?
+  youtube     String?
+  tiktok      String?
   lastChecked DateTime @default(now()) @db.Timestamptz(6)
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -50,6 +56,7 @@ model BusinessContact {
   email         String?
   phone         String?
   linkedin      String?
+  twitter       String?
   sourceUrl     String
   sourceType    String   @default("website")
   sourcePage    String?
@@ -133,6 +140,7 @@ model JobRun {
   processedCount Int?
   errorMessage   String?
   metadata       Json?
+  webhookUrl     String?
 
   @@unique([queueName, jobId])
   @@index([queueName])

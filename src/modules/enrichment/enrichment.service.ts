@@ -60,10 +60,16 @@ export class EnrichmentService {
       instagram: string | null;
       facebook: string | null;
       linkedin: string | null;
+      twitter: string | null;
+      youtube: string | null;
+      tiktok: string | null;
     } = {
       instagram: directSocialProfiles.instagram,
       facebook: directSocialProfiles.facebook,
       linkedin: directSocialProfiles.linkedin,
+      twitter: null,
+      youtube: null,
+      tiktok: null,
     };
 
     for (const page of pages) {
@@ -142,6 +148,9 @@ export class EnrichmentService {
         structured.socials.facebook ?? social.facebook;
       socialProfiles.linkedin ??=
         structured.socials.linkedin ?? social.linkedin;
+      socialProfiles.twitter ??= social.twitter;
+      socialProfiles.youtube ??= social.youtube;
+      socialProfiles.tiktok ??= social.tiktok;
     }
 
     await this.saveResult(businessId, [...emails], socialProfiles, [
@@ -171,6 +180,9 @@ export class EnrichmentService {
       instagram: string | null;
       facebook: string | null;
       linkedin: string | null;
+      twitter?: string | null;
+      youtube?: string | null;
+      tiktok?: string | null;
     },
     contacts: ExtractedContact[] = [],
   ): Promise<void> {
@@ -180,6 +192,9 @@ export class EnrichmentService {
       instagram: social.instagram,
       facebook: social.facebook,
       linkedin: social.linkedin,
+      twitter: social.twitter ?? null,
+      youtube: social.youtube ?? null,
+      tiktok: social.tiktok ?? null,
     });
 
     await this.prisma.replaceBusinessContacts({
@@ -190,6 +205,7 @@ export class EnrichmentService {
         email: contact.email,
         phone: contact.phone,
         linkedin: contact.linkedin,
+        twitter: (contact as any).twitter ?? null,
         sourceUrl: contact.sourceUrl,
         sourceType: contact.sourceType,
         sourcePage: contact.sourcePage,
@@ -205,6 +221,9 @@ export class EnrichmentService {
     instagram: string | null;
     facebook: string | null;
     linkedin: string | null;
+    twitter: string | null;
+    youtube: string | null;
+    tiktok: string | null;
   } {
     const normalized = this.normalizeUrl(website);
     if (!normalized) {
@@ -212,6 +231,9 @@ export class EnrichmentService {
         instagram: null,
         facebook: null,
         linkedin: null,
+        twitter: null,
+        youtube: null,
+        tiktok: null,
       };
     }
 
@@ -225,6 +247,9 @@ export class EnrichmentService {
       linkedin: this.isSocialDomain(normalized, this.socialDomains.linkedin)
         ? normalized
         : null,
+      twitter: null,
+      youtube: null,
+      tiktok: null,
     };
   }
 
