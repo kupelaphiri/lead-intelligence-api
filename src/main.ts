@@ -25,12 +25,10 @@ async function bootstrap() {
   );
 
   const corsOrigins = getAllowedCorsOrigins();
-  if (corsOrigins.length > 0) {
-    app.enableCors({
-      origin: corsOrigins,
-      credentials: true,
-    });
-  }
+  app.enableCors({
+    origin: corsOrigins.length > 0 ? corsOrigins : false,
+    credentials: true,
+  });
 
   if (shouldEnableSwagger()) {
     const swaggerConfig = new DocumentBuilder()

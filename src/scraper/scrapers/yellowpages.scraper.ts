@@ -3,6 +3,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { ScrapedBusiness } from '../maps.scraper';
 import { AntiDetectionService } from '../core/anti-detection.service';
+import { BlockDetectionService } from '../core/block-detection.service';
 import { RateLimiterService } from '../core/rate-limiter.service';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class YellowPagesScraper {
   constructor(
     private readonly antiDetection: AntiDetectionService,
     private readonly rateLimiter: RateLimiterService,
+    private readonly blockDetection: BlockDetectionService,
   ) {}
 
   async scrape(
@@ -37,14 +39,23 @@ export class YellowPagesScraper {
           timeout: 15000,
           headers: this.antiDetection.httpHeaders(this.baseUrl),
           maxRedirects: 5,
-          validateStatus: (s) => s >= 200 && s < 400,
+          validateStatus: () => true,
         });
 
-        const businesses = this.parseSearchResults(
-          response.data,
-          location,
-          query,
-        );
+        const html = typeof response.data === 'string' ? response.data : '';
+        const businesses = this.parseSearchResults(html, location, query);
+
+        const blockResult = this.blockDetection.inspect({
+          source: 'yellowpages',
+          url,
+          statusCode: response.status,
+          html,
+          resultCount: businesses.length,
+        });
+
+        if (this.blockDetection.isHardBlock(blockResult.signal)) {
+          break;
+        }
 
         if (businesses.length === 0) {
           break;

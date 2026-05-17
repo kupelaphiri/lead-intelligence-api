@@ -147,3 +147,21 @@ model JobRun {
   @@index([status])
   @@map("job_runs")
 }
+
+model SearchSnapshot {
+  id                 Int       @id @default(autoincrement())
+  query              String
+  city               String
+  lastScrapedAt      DateTime? @db.Timestamptz(6)
+  lastRequestedLimit Int       @default(0)
+  resultCount        Int       @default(0)
+  lastScrapeJobId    String?
+  searchCount        Int       @default(0)
+  lastSearchedAt     DateTime  @default(now()) @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([query, city])
+  @@index([lastScrapedAt])
+  @@index([searchCount])
+  @@map("search_snapshots")
+}

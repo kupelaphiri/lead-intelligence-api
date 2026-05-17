@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AntiDetectionService } from '../../scraper/core/anti-detection.service';
+import { BlockDetectionService } from '../../scraper/core/block-detection.service';
 import { PhoneService } from '../../scraper/core/phone.service';
 import { ProxyService } from '../../scraper/core/proxy.service';
 import { RateLimiterService } from '../../scraper/core/rate-limiter.service';
@@ -17,6 +18,7 @@ import { EnrichmentService } from './enrichment.service';
   imports: [QueueModule],
   providers: [
     AntiDetectionService,
+    BlockDetectionService,
     PhoneService,
     ProxyService,
     RateLimiterService,

@@ -39,6 +39,7 @@ export function assertProductionEnv(): void {
     !process.env.JWT_SECRET ? 'JWT_SECRET' : null,
     !process.env.DATABASE_URL ? 'DATABASE_URL' : null,
     !process.env.REDIS_HOST ? 'REDIS_HOST' : null,
+    getAllowedCorsOrigins().length === 0 ? 'CORS_ORIGIN' : null,
   ].filter((value): value is string => Boolean(value));
 
   if (missing.length > 0) {

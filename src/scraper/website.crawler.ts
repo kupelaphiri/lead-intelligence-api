@@ -2,6 +2,7 @@ import axios from 'axios';
 import { Injectable, Logger } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import { AntiDetectionService } from './core/anti-detection.service';
+import { BlockDetectionService } from './core/block-detection.service';
 import { ProxyService } from './core/proxy.service';
 import { RateLimiterService } from './core/rate-limiter.service';
 
@@ -64,6 +65,7 @@ export class WebsiteCrawler {
     private readonly antiDetection: AntiDetectionService,
     private readonly rateLimiter: RateLimiterService,
     private readonly proxyService: ProxyService,
+    private readonly blockDetection: BlockDetectionService,
   ) {}
 
   async crawl(startUrl: string): Promise<CrawledPage[]> {
@@ -106,16 +108,29 @@ export class WebsiteCrawler {
           timeout: 12000,
           headers: this.antiDetection.httpHeaders(startUrl),
           maxRedirects: 5,
-          validateStatus: (status) => status >= 200 && status < 400,
+          validateStatus: () => true,
           responseType: 'text',
           ...(axiosProxy ? { proxy: axiosProxy } : {}),
         });
 
-        // Skip non-HTML responses
         const contentType = String(response.headers['content-type'] ?? '');
-        if (!contentType.includes('html')) continue;
+        const html = String(response.data ?? '');
 
-        const html = String(response.data);
+        const blockResult = this.blockDetection.inspect({
+          source: 'website_crawler',
+          url: currentUrl,
+          statusCode: response.status,
+          html: contentType.includes('html') ? html : undefined,
+        });
+
+        if (response.status >= 400 || !contentType.includes('html')) {
+          continue;
+        }
+
+        if (this.blockDetection.isHardBlock(blockResult.signal)) {
+          continue;
+        }
+
         pages.push({ url: currentUrl, html });
 
         const nextLinks = this.extractInternalLinks(currentUrl, html);

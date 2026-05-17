@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { QueueModule } from '../../queue/queue.module';
 import { AntiDetectionService } from '../../scraper/core/anti-detection.service';
+import { BlockDetectionService } from '../../scraper/core/block-detection.service';
 import { ProxyService } from '../../scraper/core/proxy.service';
 import { RateLimiterService } from '../../scraper/core/rate-limiter.service';
 import { MapsScraper } from '../../scraper/maps.scraper';
@@ -15,6 +16,7 @@ import { ScraperService } from './scraper.service';
   controllers: [ScraperController],
   providers: [
     AntiDetectionService,
+    BlockDetectionService,
     ProxyService,
     RateLimiterService,
     MapsScraper,
@@ -23,6 +25,12 @@ import { ScraperService } from './scraper.service';
     YellowPagesScraper,
     ScraperService,
   ],
-  exports: [MapsScraper, AntiDetectionService, ProxyService, RateLimiterService],
+  exports: [
+    MapsScraper,
+    AntiDetectionService,
+    BlockDetectionService,
+    ProxyService,
+    RateLimiterService,
+  ],
 })
 export class ScraperModule {}

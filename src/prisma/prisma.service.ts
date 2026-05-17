@@ -117,6 +117,19 @@ export interface JobRunRecord {
   webhookUrl: string | null;
 }
 
+export interface SearchSnapshotRecord {
+  id: number;
+  query: string;
+  city: string;
+  lastScrapedAt: Date | null;
+  lastRequestedLimit: number;
+  resultCount: number;
+  lastScrapeJobId: string | null;
+  searchCount: number;
+  lastSearchedAt: Date;
+  createdAt: Date;
+}
+
 @Injectable()
 export class PrismaService implements OnModuleInit {
   private readonly client: any = new PrismaClient();
@@ -673,6 +686,120 @@ export class PrismaService implements OnModuleInit {
       where: { jobId: { in: jobIds } },
       orderBy: { startedAt: 'desc' },
     });
+  }
+
+  async findSearchSnapshot(
+    query: string,
+    city: string,
+  ): Promise<SearchSnapshotRecord | null> {
+    return this.client.searchSnapshot.findUnique({
+      where: {
+        query_city: {
+          query: this.normalizeSearchKey(query),
+          city: this.normalizeSearchKey(city),
+        },
+      },
+    });
+  }
+
+  async incrementSearchSnapshotCount(
+    query: string,
+    city: string,
+  ): Promise<void> {
+    const q = this.normalizeSearchKey(query);
+    const c = this.normalizeSearchKey(city);
+    await this.client.searchSnapshot.upsert({
+      where: { query_city: { query: q, city: c } },
+      create: {
+        query: q,
+        city: c,
+        searchCount: 1,
+        lastSearchedAt: new Date(),
+      },
+      update: {
+        searchCount: { increment: 1 },
+        lastSearchedAt: new Date(),
+      },
+    });
+  }
+
+  async markSearchSnapshotEnqueued(data: {
+    query: string;
+    city: string;
+    jobId: string;
+    requestedLimit: number;
+  }): Promise<void> {
+    const q = this.normalizeSearchKey(data.query);
+    const c = this.normalizeSearchKey(data.city);
+    const existing = await this.client.searchSnapshot.findUnique({
+      where: { query_city: { query: q, city: c } },
+    });
+    const nextLimit = Math.max(
+      existing?.lastRequestedLimit ?? 0,
+      data.requestedLimit,
+    );
+
+    await this.client.searchSnapshot.upsert({
+      where: { query_city: { query: q, city: c } },
+      create: {
+        query: q,
+        city: c,
+        lastScrapeJobId: data.jobId,
+        lastRequestedLimit: nextLimit,
+      },
+      update: {
+        lastScrapeJobId: data.jobId,
+        lastRequestedLimit: nextLimit,
+      },
+    });
+  }
+
+  async markSearchSnapshotCompleted(data: {
+    query: string;
+    city: string;
+    resultCount: number;
+  }): Promise<void> {
+    const q = this.normalizeSearchKey(data.query);
+    const c = this.normalizeSearchKey(data.city);
+    await this.client.searchSnapshot.upsert({
+      where: { query_city: { query: q, city: c } },
+      create: {
+        query: q,
+        city: c,
+        lastScrapedAt: new Date(),
+        resultCount: data.resultCount,
+      },
+      update: {
+        lastScrapedAt: new Date(),
+        resultCount: data.resultCount,
+      },
+    });
+  }
+
+  async findStalePopularSearches(args: {
+    staleMs: number;
+    minSearchCount: number;
+    limit: number;
+  }): Promise<SearchSnapshotRecord[]> {
+    const cutoff = new Date(Date.now() - args.staleMs);
+    return this.client.searchSnapshot.findMany({
+      where: {
+        searchCount: { gte: args.minSearchCount },
+        OR: [
+          { lastScrapedAt: null },
+          { lastScrapedAt: { lt: cutoff } },
+        ],
+      },
+      orderBy: [
+        { searchCount: 'desc' },
+        { lastScrapedAt: 'asc' },
+      ],
+      take: args.limit,
+    });
+  }
+
+  private normalizeSearchKey(value: string): string {
+    return value.trim().toLowerCase();
   }
 
   private createBillingPeriodWindow(baseDate = new Date()): {

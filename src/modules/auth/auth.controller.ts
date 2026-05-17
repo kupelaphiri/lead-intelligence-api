@@ -27,7 +27,7 @@ interface AuthRequest extends Request {
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @ApiOperation({ summary: 'Sign up user and issue API key + JWT cookie' })
+  @ApiOperation({ summary: 'Sign up user and issue JWT cookie' })
   @ApiBody({ type: SignupDto })
   @ApiResponse({ status: 201, description: 'Signup successful' })
   @Public()
@@ -35,17 +35,14 @@ export class AuthController {
   async signup(
     @Body() payload: SignupDto,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<{ apiKey: string; user: unknown }> {
+  ): Promise<{ user: unknown }> {
     const result = await this.authService.signup(payload);
     this.setAuthCookie(response, result.accessToken);
 
-    return {
-      apiKey: result.apiKey,
-      user: result.user,
-    };
+    return { user: result.user };
   }
 
-  @ApiOperation({ summary: 'Login user and issue API key + JWT cookie' })
+  @ApiOperation({ summary: 'Login user and issue JWT cookie' })
   @ApiBody({ type: LoginDto })
   @ApiResponse({ status: 201, description: 'Login successful' })
   @Public()
@@ -53,14 +50,22 @@ export class AuthController {
   async login(
     @Body() payload: LoginDto,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<{ apiKey: string; user: unknown }> {
+  ): Promise<{ user: unknown }> {
     const result = await this.authService.login(payload);
     this.setAuthCookie(response, result.accessToken);
 
-    return {
-      apiKey: result.apiKey,
-      user: result.user,
-    };
+    return { user: result.user };
+  }
+
+  @ApiOperation({ summary: 'Retrieve current API key' })
+  @ApiBearerAuth()
+  @ApiCookieAuth('li_auth')
+  @ApiResponse({ status: 200, description: 'API key returned' })
+  @Get('api-key')
+  async getApiKey(
+    @Req() request: AuthRequest,
+  ): Promise<{ apiKey: string }> {
+    return this.authService.getApiKey(request.authUserId);
   }
 
   @ApiOperation({ summary: 'Logout and clear auth cookie' })

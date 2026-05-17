@@ -52,6 +52,17 @@ export class AuthService {
     };
   }
 
+  async getApiKey(userId: number | undefined): Promise<{ apiKey: string }> {
+    if (!userId) {
+      throw new UnauthorizedException('User context missing');
+    }
+
+    const existing = await this.apiKeysService.findLatestByUserId(userId);
+    const apiKey = existing ?? (await this.apiKeysService.createForUser(userId));
+
+    return { apiKey: apiKey.key };
+  }
+
   async me(userId: number | undefined): Promise<unknown> {
     if (!userId) {
       throw new UnauthorizedException('User context missing');

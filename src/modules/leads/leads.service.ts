@@ -7,6 +7,7 @@ import {
   BusinessContactRecord,
   BusinessWithEnrichment,
   PrismaService,
+  SearchSnapshotRecord,
 } from '../../prisma/prisma.service';
 import {
   EmailAssessment,
@@ -37,6 +38,7 @@ interface LeadFilters {
 @Injectable()
 export class LeadsService {
   private readonly staleEnrichmentMs = 1000 * 60 * 60 * 24 * 14;
+  private readonly searchFreshnessMs = 1000 * 60 * 60 * 24 * 3;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -73,6 +75,9 @@ export class LeadsService {
       );
     }
 
+    await this.prisma.incrementSearchSnapshotCount(query, city);
+    const snapshot = await this.prisma.findSearchSnapshot(query, city);
+
     const candidateLimit = Math.max(limit, Math.min(limit * 3, 300));
     const businesses = await this.prisma.findBusinessesByQueryCity(
       query,
@@ -97,15 +102,18 @@ export class LeadsService {
       );
 
       await this.prisma.incrementUserLeads(user.id, newlyDeliveredCount);
+
       const hasPartialCache = rankedBusinesses.length < limit;
-      const jobId = hasPartialCache
-        ? await this.mapsQueue.enqueueScrape({ query, city, limit })
+      const cacheTrusted = this.isCacheTrusted(snapshot, limit);
+      const shouldScrape = !cacheTrusted && hasPartialCache;
+      const jobId = shouldScrape
+        ? await this.ensureScrapeEnqueued(query, city, limit, snapshot)
         : undefined;
 
       return {
         status: 'ready',
         data: rankedBusinesses,
-        message: hasPartialCache
+        message: shouldScrape
           ? `Returned ${rankedBusinesses.length} cached leads and started a background scrape to fill the remaining ${limit - rankedBusinesses.length}.`
           : undefined,
         jobId,
@@ -116,7 +124,7 @@ export class LeadsService {
       };
     }
 
-    const jobId = await this.mapsQueue.enqueueScrape({ query, city, limit });
+    const jobId = await this.ensureScrapeEnqueued(query, city, limit, snapshot);
     return {
       status: 'processing',
       message:
@@ -128,6 +136,43 @@ export class LeadsService {
       query,
       city,
     };
+  }
+
+  private isCacheTrusted(
+    snapshot: SearchSnapshotRecord | null,
+    currentLimit: number,
+  ): boolean {
+    if (!snapshot || !snapshot.lastScrapedAt) {
+      return false;
+    }
+    const age = Date.now() - new Date(snapshot.lastScrapedAt).getTime();
+    if (age > this.searchFreshnessMs) {
+      return false;
+    }
+    return snapshot.lastRequestedLimit >= currentLimit;
+  }
+
+  private async ensureScrapeEnqueued(
+    query: string,
+    city: string,
+    limit: number,
+    snapshot: SearchSnapshotRecord | null,
+  ): Promise<string> {
+    if (snapshot?.lastScrapeJobId && snapshot.lastRequestedLimit >= limit) {
+      const run = await this.prisma.findJobRunByJobId(snapshot.lastScrapeJobId);
+      if (run && run.status === 'running') {
+        return snapshot.lastScrapeJobId;
+      }
+    }
+
+    const jobId = await this.mapsQueue.enqueueScrape({ query, city, limit });
+    await this.prisma.markSearchSnapshotEnqueued({
+      query,
+      city,
+      jobId,
+      requestedLimit: limit,
+    });
+    return jobId;
   }
 
   private async queueStaleEnrichmentRefreshes(

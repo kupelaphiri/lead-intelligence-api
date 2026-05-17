@@ -67,6 +67,12 @@ export class MapsWorker extends WorkerHost {
         processedCount: scraped.length,
       });
 
+      await this.prisma.markSearchSnapshotCompleted({
+        query: job.data.query,
+        city: job.data.city,
+        resultCount: scraped.length,
+      });
+
       if (completedRun.webhookUrl) {
         void this.webhookService.send(completedRun.webhookUrl, {
           event: 'job.completed',

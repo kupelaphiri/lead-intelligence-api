@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { chromium } from 'playwright';
 import { AntiDetectionService } from './core/anti-detection.service';
+import { BlockDetectionService } from './core/block-detection.service';
 import { ProxyService } from './core/proxy.service';
 
 export interface ScrapedBusiness {
@@ -25,6 +26,7 @@ export class MapsScraper {
   constructor(
     private readonly antiDetection: AntiDetectionService,
     private readonly proxyService: ProxyService,
+    private readonly blockDetection: BlockDetectionService,
   ) {}
 
   async scrape(
@@ -72,9 +74,14 @@ export class MapsScraper {
 
       await this.antiDetection.randomDelay(1200, 2500);
 
-      if (this.isBlocked(page.url())) {
+      const initialBlock = this.blockDetection.inspect({
+        source: 'google_maps',
+        url: targetUrl,
+        finalUrl: page.url(),
+      });
+      if (this.blockDetection.isHardBlock(initialBlock.signal)) {
         throw new Error(
-          `Google Maps blocked or challenged the session at ${page.url()}`,
+          `Google Maps ${initialBlock.signal} at ${page.url()}`,
         );
       }
 
@@ -101,6 +108,14 @@ export class MapsScraper {
         this.logger.warn(
           `No map cards detected for query="${query}" city="${city}". URL: ${page.url()}`,
         );
+        const html = await page.content().catch(() => '');
+        this.blockDetection.inspect({
+          source: 'google_maps',
+          url: targetUrl,
+          finalUrl: page.url(),
+          html,
+          resultCount: 0,
+        });
         await this.antiDetection.randomDelay(2000, 3500);
         rawCardCount = await cards.count();
       }
@@ -341,13 +356,4 @@ export class MapsScraper {
     return output;
   }
 
-  private isBlocked(url: string): boolean {
-    const lower = url.toLowerCase();
-    return (
-      lower.includes('/sorry/') ||
-      lower.includes('consent.google') ||
-      lower.includes('/interstitial') ||
-      lower.includes('ipv4.google.com')
-    );
-  }
 }
